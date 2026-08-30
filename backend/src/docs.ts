@@ -156,6 +156,16 @@ export const openApiDocument = {
       }
     },
     "/v1/hooks/{id}/{secret}": {
+      get: {
+        tags: ["Listeners"],
+        summary: "Inspect listener webhook usage",
+        description: "Opening a valid webhook URL returns POST instructions without sending a notification.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "secret", in: "path", required: true, schema: { type: "string" } }
+        ],
+        responses: { "200": { description: "Listener name and accepted POST formats." }, "404": { description: "Webhook URL is not valid." } }
+      },
       post: {
         tags: ["Listeners"],
         summary: "Deliver a push notification through a listener",
@@ -247,6 +257,7 @@ Content-Type: application/json</pre>
           <tr><td class="method">DELETE</td><td><code>/v1/actions/:id</code></td><td>Bearer</td><td>Delete an action</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/listeners</code></td><td>Bearer</td><td>Create a listener</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/listeners/:id</code></td><td>Bearer</td><td>Delete a listener</td></tr>
+          <tr><td class="method">GET</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>View webhook usage</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>Deliver a push</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/devices</code></td><td>Bearer</td><td>Register APNs device</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/devices/:token</code></td><td>Bearer</td><td>Remove APNs device</td></tr>
@@ -279,7 +290,7 @@ Content-Type: application/json</pre>
   -H 'Content-Type: text/plain' \\
   -H 'X-Devcom-Title: Backup complete' \\
   --data '12.4 GB copied in 83 seconds'</pre>
-        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports <code>delivered</code>, <code>failed</code>, and registered <code>devices</code>.</p>
+        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports <code>delivered</code>, <code>failed</code>, and registered <code>devices</code>. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
       </section>
       <section id="devices"><h2>Devices</h2><p>The iOS client manages this automatically. Manual registration accepts a hexadecimal APNs token and <code>sandbox</code> or <code>production</code>.</p>
         <pre>POST /v1/devices

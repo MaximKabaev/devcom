@@ -110,7 +110,7 @@ private struct ActionRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            signalRail(color: DevcomTheme.outbound, icon: "arrow.up.right")
+            eventBadge(color: DevcomTheme.outbound, icon: "bolt.fill")
             VStack(alignment: .leading, spacing: 5) {
                 Text(action.name).font(.headline).foregroundStyle(DevcomTheme.ink)
                 Text("\(action.method)  \(action.url)")
@@ -140,7 +140,7 @@ private struct ListenerRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            signalRail(color: DevcomTheme.inbound, icon: "arrow.down.left")
+            eventBadge(color: DevcomTheme.inbound, icon: "bell.fill")
             VStack(alignment: .leading, spacing: 5) {
                 Text(listener.name).font(.headline).foregroundStyle(DevcomTheme.ink)
                 Text(listener.webhookURL)
@@ -154,9 +154,11 @@ private struct ListenerRow: View {
                 copied = true
                 Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
             } label: {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .frame(width: 42, height: 42)
-                    .background(DevcomTheme.inbound.opacity(0.12), in: Circle())
+                Label(copied ? "Copied" : "Copy URL", systemImage: copied ? "checkmark" : "link")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .frame(height: 38)
+                    .background(DevcomTheme.inbound.opacity(0.12), in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(copied ? "Copied" : "Copy webhook URL")
@@ -165,10 +167,13 @@ private struct ListenerRow: View {
     }
 }
 
-private func signalRail(color: Color, icon: String) -> some View {
+private func eventBadge(color: Color, icon: String) -> some View {
     ZStack {
-        Capsule().fill(color.opacity(0.14)).frame(width: 34, height: 48)
-        Capsule().fill(color).frame(width: 3, height: 28).offset(x: -10)
-        Image(systemName: icon).font(.system(size: 13, weight: .bold)).foregroundStyle(color)
+        Circle().fill(color.opacity(0.12))
+        Circle().stroke(color.opacity(0.22), lineWidth: 1)
+        Image(systemName: icon)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(color)
     }
+    .frame(width: 38, height: 38)
 }

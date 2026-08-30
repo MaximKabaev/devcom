@@ -141,6 +141,22 @@ app.delete("/v1/devices/:token", { preHandler: requireAuth }, async (request, re
   return reply.code(204).send();
 });
 
+app.get("/v1/hooks/:id/:secret", async (request, reply) => {
+  const { id, secret } = request.params as { id: string; secret: string };
+  const event = store.findListener(id);
+  if (!event || event.secret !== secret) return reply.code(404).send({ error: "Listener not found" });
+  return {
+    listener: event.name,
+    message: "This is a webhook URL. Send a POST request to trigger a push notification.",
+    accepts: {
+      json: { title: "Notification title", message: "Notification body" },
+      headers: ["X-Devcom-Title", "X-Devcom-Message"],
+      body: "Plain text is accepted."
+    },
+    docs: `${config.PUBLIC_URL.replace(/\/$/, "")}/docs`
+  };
+});
+
 app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
   const { id, secret } = request.params as { id: string; secret: string };
   const event = store.findListener(id);
