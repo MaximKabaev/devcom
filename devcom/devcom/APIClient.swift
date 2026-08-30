@@ -37,22 +37,34 @@ actor APIClient {
     func events() async throws -> EventsResponse { try await request(path: "/v1/events") }
 
     func createAction(name: String, method: String, url: String, headers: [String: String], body: String?) async throws -> ActionEvent {
-        struct Payload: Encodable {
-            let name: String
-            let method: String
-            let url: String
-            let headers: [String: String]
-            let body: String?
-        }
         return try await request(
             path: "/v1/actions",
             method: "POST",
-            body: Payload(name: name, method: method, url: url, headers: headers, body: body)
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body)
+        )
+    }
+
+    func updateAction(
+        id: String,
+        name: String,
+        method: String,
+        url: String,
+        headers: [String: String],
+        body: String?
+    ) async throws -> ActionEvent {
+        return try await request(
+            path: "/v1/actions/\(id)",
+            method: "PATCH",
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body)
         )
     }
 
     func createListener(name: String) async throws -> Listener {
         try await request(path: "/v1/listeners", method: "POST", body: ["name": name])
+    }
+
+    func updateListener(id: String, name: String) async throws -> Listener {
+        try await request(path: "/v1/listeners/\(id)", method: "PATCH", body: ["name": name])
     }
 
     func runAction(id: String) async throws -> ActionRunResult {
@@ -113,6 +125,26 @@ actor APIClient {
 }
 
 private nonisolated struct ServerError: Decodable { let error: String }
+
+private nonisolated struct ActionPayload: Encodable {
+    let name: String
+    let method: String
+    let url: String
+    let headers: [String: String]
+    let body: String?
+
+    enum CodingKeys: String, CodingKey { case name, method, url, headers, body }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(method, forKey: .method)
+        try container.encode(url, forKey: .url)
+        try container.encode(headers, forKey: .headers)
+        if let body { try container.encode(body, forKey: .body) }
+        else { try container.encodeNil(forKey: .body) }
+    }
+}
 
 private nonisolated struct AnyEncodable: Encodable {
     private let encodeValue: (Encoder) throws -> Void

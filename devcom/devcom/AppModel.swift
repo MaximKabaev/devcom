@@ -95,6 +95,40 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription; return false }
     }
 
+    func updateAction(
+        _ action: ActionEvent,
+        name: String,
+        method: String,
+        url: String,
+        headers: [String: String],
+        body: String?
+    ) async -> Bool {
+        guard let client else { return false }
+        do {
+            let updated = try await client.updateAction(
+                id: action.id,
+                name: name,
+                method: method,
+                url: url,
+                headers: headers,
+                body: body
+            )
+            if let index = actions.firstIndex(where: { $0.id == updated.id }) { actions[index] = updated }
+            errorMessage = nil
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func updateListener(_ listener: Listener, name: String) async -> Bool {
+        guard let client else { return false }
+        do {
+            let updated = try await client.updateListener(id: listener.id, name: name)
+            if let index = listeners.firstIndex(where: { $0.id == updated.id }) { listeners[index] = updated }
+            errorMessage = nil
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
     func run(_ action: ActionEvent) async {
         guard let client else { return }
         runningActionID = action.id

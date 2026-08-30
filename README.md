@@ -112,8 +112,10 @@ Alternatively, send any plain-text body and set `X-Devcom-Title`; or set both `X
 | `GET` | `/v1/events` | Owner or agent bearer token | List both event types |
 | `POST` | `/v1/actions` | Owner or agent bearer token | Create an action |
 | `POST` | `/v1/actions/:id/run` | Owner or agent bearer token | Run an action |
+| `PATCH` | `/v1/actions/:id` | Owner or agent bearer token | Edit an action |
 | `DELETE` | `/v1/actions/:id` | Owner or agent bearer token | Delete an action |
 | `POST` | `/v1/listeners` | Owner or agent bearer token | Create a listener |
+| `PATCH` | `/v1/listeners/:id` | Owner or agent bearer token | Rename a listener |
 | `DELETE` | `/v1/listeners/:id` | Owner or agent bearer token | Delete a listener |
 | `POST` | `/v1/devices` | Owner or agent bearer token | Register an APNs device |
 | `POST` | `/v1/hooks/:id/:secret` | Secret URL | Send a push notification |

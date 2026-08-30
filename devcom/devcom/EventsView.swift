@@ -6,9 +6,20 @@ struct EventsView: View {
     @State private var presentedSheet: Sheet?
 
     private enum Sheet: Identifiable {
-        case createAction, createListener, settings
-        var id: Int {
-            switch self { case .createAction: 0; case .createListener: 1; case .settings: 2 }
+        case createAction
+        case createListener
+        case editAction(ActionEvent)
+        case editListener(Listener)
+        case settings
+
+        var id: String {
+            switch self {
+            case .createAction: "create-action"
+            case .createListener: "create-listener"
+            case .editAction(let action): "edit-action-\(action.id)"
+            case .editListener(let listener): "edit-listener-\(listener.id)"
+            case .settings: "settings"
+            }
         }
     }
 
@@ -49,6 +60,8 @@ struct EventsView: View {
                 switch sheet {
                 case .createAction: ActionEditorView(model: model)
                 case .createListener: ListenerEditorView(model: model)
+                case .editAction(let action): ActionEditorView(model: model, action: action)
+                case .editListener(let listener): ListenerEditorView(model: model, listener: listener)
                 case .settings: SettingsView(model: model)
                 }
             }
@@ -68,9 +81,12 @@ struct EventsView: View {
         } else {
             List {
                 ForEach(model.actions) { action in
-                    ActionRow(action: action, isRunning: model.runningActionID == action.id) {
-                        Task { await model.run(action) }
-                    }
+                    ActionRow(
+                        action: action,
+                        isRunning: model.runningActionID == action.id,
+                        edit: { presentedSheet = .editAction(action) },
+                        run: { Task { await model.run(action) } }
+                    )
                         .listRowBackground(DevcomTheme.surface)
                         .swipeActions {
                             Button("Delete", role: .destructive) { Task { await model.deleteAction(action) } }
@@ -91,7 +107,7 @@ struct EventsView: View {
         } else {
             List {
                 ForEach(model.listeners) { listener in
-                    ListenerRow(listener: listener)
+                    ListenerRow(listener: listener, edit: { presentedSheet = .editListener(listener) })
                         .listRowBackground(DevcomTheme.surface)
                         .swipeActions {
                             Button("Delete", role: .destructive) { Task { await model.deleteListener(listener) } }
@@ -106,19 +122,30 @@ struct EventsView: View {
 private struct ActionRow: View {
     let action: ActionEvent
     let isRunning: Bool
+    let edit: () -> Void
     let run: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
-            eventBadge(color: DevcomTheme.outbound, icon: "bolt.fill")
-            VStack(alignment: .leading, spacing: 5) {
-                Text(action.name).font(.headline).foregroundStyle(DevcomTheme.ink)
-                Text("\(action.method)  \(action.url)")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(DevcomTheme.muted)
-                    .lineLimit(1)
+            Button(action: edit) {
+                HStack(spacing: 14) {
+                    eventBadge(color: DevcomTheme.outbound, icon: "bolt.fill")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(action.name).font(.headline).foregroundStyle(DevcomTheme.ink)
+                        Text("\(action.method)  \(action.url)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(DevcomTheme.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(DevcomTheme.muted.opacity(0.65))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 8)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(action.name)")
             Button {
                 run()
             } label: {
@@ -136,19 +163,30 @@ private struct ActionRow: View {
 
 private struct ListenerRow: View {
     let listener: Listener
+    let edit: () -> Void
     @State private var copied = false
 
     var body: some View {
         HStack(spacing: 14) {
-            eventBadge(color: DevcomTheme.inbound, icon: "bell.fill")
-            VStack(alignment: .leading, spacing: 5) {
-                Text(listener.name).font(.headline).foregroundStyle(DevcomTheme.ink)
-                Text(listener.webhookURL)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(DevcomTheme.muted)
-                    .lineLimit(1)
+            Button(action: edit) {
+                HStack(spacing: 14) {
+                    eventBadge(color: DevcomTheme.inbound, icon: "bell.fill")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(listener.name).font(.headline).foregroundStyle(DevcomTheme.ink)
+                        Text(listener.webhookURL)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(DevcomTheme.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(DevcomTheme.muted.opacity(0.65))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 8)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(listener.name)")
             Button {
                 UIPasteboard.general.string = listener.webhookURL
                 copied = true

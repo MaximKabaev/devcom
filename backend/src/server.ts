@@ -11,7 +11,7 @@ import { createSession, isAuthorized, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { docsHTML, openApiDocument } from "./docs.js";
 import { Store } from "./store.js";
-import { httpMethods, type Listener } from "./types.js";
+import { httpMethods, type ActionEvent, type Listener } from "./types.js";
 
 const config = loadConfig();
 const store = new Store(config.DATA_FILE, config.CONFIG_ENCRYPTION_KEY);
@@ -51,6 +51,7 @@ const actionSchema = z.object({
   headers: z.record(z.string(), z.string().max(8_192)).default({}),
   body: z.string().max(200_000).nullable().default(null)
 });
+const actionUpdateSchema = actionSchema.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
 const listenerSchema = z.object({ name: z.string().trim().min(1).max(80) });
 const deviceSchema = z.object({
   token: z.string().regex(/^[a-fA-F0-9]{64,}$/),
@@ -97,6 +98,20 @@ app.post("/v1/actions/:id/run", { preHandler: requireAuth }, async (request, rep
   }
 });
 
+app.patch("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply) => {
+  const id = (request.params as { id: string }).id;
+  if (!store.findAction(id)) return reply.code(404).send({ error: "Action not found" });
+  const parsed = actionUpdateSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid action update", details: parsed.error.flatten() });
+  const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body">> = {};
+  if (parsed.data.name !== undefined) update.name = parsed.data.name;
+  if (parsed.data.method !== undefined) update.method = parsed.data.method;
+  if (parsed.data.url !== undefined) update.url = parsed.data.url;
+  if (parsed.data.headers !== undefined) update.headers = parsed.data.headers;
+  if (parsed.data.body !== undefined) update.body = parsed.data.body;
+  return store.updateAction(id, update);
+});
+
 app.delete("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply) => {
   const removed = await store.removeAction((request.params as { id: string }).id);
   return removed ? reply.code(204).send() : reply.code(404).send({ error: "Action not found" });
@@ -120,6 +135,17 @@ const createListener = async (request: FastifyRequest, reply: FastifyReply) => {
 
 app.post("/v1/listeners", { preHandler: requireAuth }, createListener);
 app.post("/v1/listens", { preHandler: requireAuth }, createListener);
+
+const updateListener = async (request: FastifyRequest, reply: FastifyReply) => {
+  const id = (request.params as { id: string }).id;
+  if (!store.findListener(id)) return reply.code(404).send({ error: "Listener not found" });
+  const parsed = listenerSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid listener update", details: parsed.error.flatten() });
+  return store.updateListener(id, parsed.data);
+};
+
+app.patch("/v1/listeners/:id", { preHandler: requireAuth }, updateListener);
+app.patch("/v1/listens/:id", { preHandler: requireAuth }, updateListener);
 
 const deleteListener = async (request: FastifyRequest, reply: FastifyReply) => {
   const removed = await store.removeListener((request.params as { id: string }).id);

@@ -39,6 +39,17 @@ export const openApiDocument = {
           body: { type: ["string", "null"], maxLength: 200000, default: null }
         }
       },
+      ActionUpdate: {
+        type: "object",
+        minProperties: 1,
+        properties: {
+          name: { type: "string", maxLength: 80 },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          url: { type: "string", format: "uri", pattern: "^https?://" },
+          headers: { type: "object", additionalProperties: { type: "string" } },
+          body: { type: ["string", "null"], maxLength: 200000 }
+        }
+      },
       ListenerInput: {
         type: "object",
         required: ["name"],
@@ -111,6 +122,15 @@ export const openApiDocument = {
       }
     },
     "/v1/actions/{id}": {
+      patch: {
+        tags: ["Actions"],
+        summary: "Update an action",
+        description: "Send one or more action fields. Omitted fields retain their current values; body can be null.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ActionUpdate" } } } },
+        responses: { "200": { description: "The updated action." }, "400": { description: "Invalid update." }, "404": { description: "Action not found." } }
+      },
       delete: {
         tags: ["Actions"],
         summary: "Delete an action",
@@ -129,6 +149,14 @@ export const openApiDocument = {
       }
     },
     "/v1/listeners/{id}": {
+      patch: {
+        tags: ["Listeners"],
+        summary: "Rename a listener",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ListenerInput" } } } },
+        responses: { "200": { description: "The updated listener; its webhookURL is unchanged." }, "404": { description: "Listener not found." } }
+      },
       delete: {
         tags: ["Listeners"],
         summary: "Delete a listener",
@@ -254,8 +282,10 @@ Content-Type: application/json</pre>
           <tr><td class="method">GET</td><td><code>/v1/events</code></td><td>Bearer</td><td>List actions and listeners</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions</code></td><td>Bearer</td><td>Create an action</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions/:id/run</code></td><td>Bearer</td><td>Run an action</td></tr>
+          <tr><td class="method">PATCH</td><td><code>/v1/actions/:id</code></td><td>Bearer</td><td>Edit an action</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/actions/:id</code></td><td>Bearer</td><td>Delete an action</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/listeners</code></td><td>Bearer</td><td>Create a listener</td></tr>
+          <tr><td class="method">PATCH</td><td><code>/v1/listeners/:id</code></td><td>Bearer</td><td>Rename a listener</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/listeners/:id</code></td><td>Bearer</td><td>Delete a listener</td></tr>
           <tr><td class="method">GET</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>View webhook usage</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>Deliver a push</td></tr>
@@ -276,6 +306,10 @@ Content-Type: application/json</pre>
   }'</pre>
         <h3>Run</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/actions/ACTION_ID/run \\
   -H "Authorization: Bearer $AGENT_API_TOKEN"</pre>
+        <h3>Edit</h3><pre>curl -X PATCH https://devcom.maximkabaev.com/v1/actions/ACTION_ID \\
+  -H "Authorization: Bearer $AGENT_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"url":"https://api.example.com/new-endpoint"}'</pre>
         <p>Run responses include <code>ok</code>, upstream <code>status</code>, <code>durationMs</code>, <code>response</code>, and <code>truncated</code>. Redirects are returned without being followed.</p>
       </section>
       <section id="listeners"><h2>Listeners</h2><p>Create a listener once, then give its returned <code>webhookURL</code> to the source service.</p>
@@ -283,6 +317,7 @@ Content-Type: application/json</pre>
   -H "Authorization: Bearer $AGENT_API_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"name":"Deploy finished"}'</pre>
+        <p>Rename with <code>PATCH /v1/listeners/LISTENER_ID</code> and <code>{"name":"New name"}</code>. The webhook URL remains the same.</p>
         <h3>Deliver with JSON</h3><pre>curl -X POST 'WEBHOOK_URL' \\
   -H 'Content-Type: application/json' \\
   -d '{"title":"Deploy complete","message":"api.example.com is live"}'</pre>

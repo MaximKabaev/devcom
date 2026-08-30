@@ -52,6 +52,29 @@ export class Store {
     await this.persist();
   }
 
+  async updateAction(
+    id: string,
+    update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body">>
+  ): Promise<ActionEvent | undefined> {
+    const index = this.data.actions.findIndex((item) => item.id === id);
+    const current = this.data.actions[index];
+    if (index < 0 || !current) return undefined;
+    const updated: ActionEvent = { ...current, ...update, updatedAt: new Date().toISOString() };
+    this.data.actions[index] = updated;
+    await this.persist();
+    return structuredClone(updated);
+  }
+
+  async updateListener(id: string, update: Pick<Listener, "name">): Promise<Listener | undefined> {
+    const index = this.data.listeners.findIndex((item) => item.id === id);
+    const current = this.data.listeners[index];
+    if (index < 0 || !current) return undefined;
+    const updated: Listener = { ...current, ...update, updatedAt: new Date().toISOString() };
+    this.data.listeners[index] = updated;
+    await this.persist();
+    return structuredClone(updated);
+  }
+
   async removeAction(id: string): Promise<boolean> {
     const before = this.data.actions.length;
     this.data.actions = this.data.actions.filter((item) => item.id !== id);

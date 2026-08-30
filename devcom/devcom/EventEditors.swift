@@ -2,16 +2,27 @@ import SwiftUI
 
 struct ActionEditorView: View {
     @Bindable var model: AppModel
+    let action: ActionEvent?
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var method = "POST"
-    @State private var url = ""
-    @State private var headers = "{\n  \"Content-Type\": \"application/json\"\n}"
-    @State private var requestBody = ""
+    @State private var name: String
+    @State private var method: String
+    @State private var url: String
+    @State private var headers: String
+    @State private var requestBody: String
     @State private var validationMessage: String?
     @State private var isSaving = false
 
     private let methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+
+    init(model: AppModel, action: ActionEvent? = nil) {
+        self.model = model
+        self.action = action
+        _name = State(initialValue: action?.name ?? "")
+        _method = State(initialValue: action?.method ?? "POST")
+        _url = State(initialValue: action?.url ?? "")
+        _headers = State(initialValue: Self.formattedHeaders(action?.headers))
+        _requestBody = State(initialValue: action?.body ?? "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -50,7 +61,7 @@ struct ActionEditorView: View {
                     Section { Text(validationMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("New action")
+            .navigationTitle(action == nil ? "New action" : "Action configuration")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -77,24 +88,52 @@ struct ActionEditorView: View {
         validationMessage = nil
         isSaving = true
         Task {
-            let saved = await model.createAction(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                method: method,
-                url: url,
-                headers: object,
-                body: requestBody.isEmpty ? nil : requestBody
-            )
+            let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let savedBody = method == "GET" || method == "DELETE" || requestBody.isEmpty ? nil : requestBody
+            let saved: Bool
+            if let action {
+                saved = await model.updateAction(
+                    action,
+                    name: cleanName,
+                    method: method,
+                    url: url,
+                    headers: object,
+                    body: savedBody
+                )
+            } else {
+                saved = await model.createAction(
+                    name: cleanName,
+                    method: method,
+                    url: url,
+                    headers: object,
+                    body: savedBody
+                )
+            }
             isSaving = false
             if saved { dismiss() }
         }
+    }
+
+    private static func formattedHeaders(_ headers: [String: String]?) -> String {
+        guard let headers else { return "{\n  \"Content-Type\": \"application/json\"\n}" }
+        guard let data = try? JSONSerialization.data(withJSONObject: headers, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
     }
 }
 
 struct ListenerEditorView: View {
     @Bindable var model: AppModel
+    let listener: Listener?
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
+    @State private var name: String
     @State private var isSaving = false
+
+    init(model: AppModel, listener: Listener? = nil) {
+        self.model = model
+        self.listener = listener
+        _name = State(initialValue: listener?.name ?? "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -102,7 +141,20 @@ struct ListenerEditorView: View {
                 Section {
                     TextField("Name", text: $name, prompt: Text("Deploy finished"))
                 } footer: {
-                    Text("After saving, copy the secret URL and POST a title and message to it.")
+                    Text(listener == nil ? "After saving, copy the secret URL and POST a title and message to it." : "Renaming a listener does not change its secret webhook URL.")
+                }
+
+                if let listener {
+                    Section("Webhook URL") {
+                        Text(listener.webhookURL)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button {
+                            UIPasteboard.general.string = listener.webhookURL
+                        } label: {
+                            Label("Copy webhook URL", systemImage: "link")
+                        }
+                    }
                 }
 
                 Section("Accepted payload") {
@@ -111,7 +163,7 @@ struct ListenerEditorView: View {
                         .foregroundStyle(DevcomTheme.muted)
                 }
             }
-            .navigationTitle("New listener")
+            .navigationTitle(listener == nil ? "New listener" : "Listener configuration")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -119,7 +171,13 @@ struct ListenerEditorView: View {
                     Button(isSaving ? "Saving…" : "Save") {
                         isSaving = true
                         Task {
-                            let saved = await model.createListener(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+                            let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let saved: Bool
+                            if let listener {
+                                saved = await model.updateListener(listener, name: cleanName)
+                            } else {
+                                saved = await model.createListener(name: cleanName)
+                            }
                             isSaving = false
                             if saved { dismiss() }
                         }
