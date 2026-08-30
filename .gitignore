@@ -1,0 +1,9 @@
+.DS_Store
+.env
+backend/.env
+backend/secrets/
+backend/data/
+backend/dist/
+backend/node_modules/
+**/xcuserdata/
+*.xcuserstate
