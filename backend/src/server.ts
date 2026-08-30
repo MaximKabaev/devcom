@@ -197,15 +197,33 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
 
   const devices = store.listDevices();
   const results = await Promise.allSettled(devices.map((device) => apns.send(device, { title, body: message })));
+  const failureCounts = new Map<string, number>();
   for (const result of results) {
     if (result.status === "fulfilled" && result.value.invalidToken) await store.removeDevice(result.value.token);
-    if (result.status === "rejected") app.log.warn({ error: result.reason }, "APNs request failed");
+    if (result.status === "rejected") {
+      const reason = "APNs request failed";
+      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
+      app.log.warn({ error: result.reason }, reason);
+    }
     if (result.status === "fulfilled" && !result.value.delivered) {
-      app.log.warn({ reason: result.value.reason ?? "Unknown APNs error" }, "Push was not delivered");
+      const reason = result.value.reason ?? "Unknown APNs error";
+      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
+      app.log.warn({ reason }, "Push was not delivered");
     }
   }
   const delivered = results.filter((result) => result.status === "fulfilled" && result.value.delivered).length;
-  return reply.code(202).send({ accepted: true, delivered, failed: devices.length - delivered, devices: devices.length });
+  const environments = devices.reduce(
+    (counts, device) => ({ ...counts, [device.environment]: counts[device.environment] + 1 }),
+    { sandbox: 0, production: 0 }
+  );
+  return reply.code(202).send({
+    accepted: true,
+    delivered,
+    failed: devices.length - delivered,
+    devices: devices.length,
+    environments,
+    errors: Array.from(failureCounts, ([reason, count]) => ({ reason, count }))
+  });
 });
 
 await store.load();

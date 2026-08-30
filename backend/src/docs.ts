@@ -205,7 +205,7 @@ export const openApiDocument = {
           { name: "X-Devcom-Message", in: "header", required: false, schema: { type: "string", maxLength: 700 } }
         ],
         requestBody: { content: { "application/json": { schema: { $ref: "#/components/schemas/WebhookInput" } }, "text/plain": { schema: { type: "string" } } } },
-        responses: { "202": { description: "Notification accepted; includes delivered, failed, and devices counts." }, "404": { description: "Webhook URL is not valid." } }
+        responses: { "202": { description: "Notification accepted; includes delivery counts, device environments, and sanitized APNs error reasons." }, "404": { description: "Webhook URL is not valid." } }
       }
     }
   }
@@ -325,7 +325,7 @@ Content-Type: application/json</pre>
   -H 'Content-Type: text/plain' \\
   -H 'X-Devcom-Title: Backup complete' \\
   --data '12.4 GB copied in 83 seconds'</pre>
-        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports <code>delivered</code>, <code>failed</code>, and registered <code>devices</code>. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
+        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports delivery counts, registered device environments, and sanitized APNs error reasons. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
       </section>
       <section id="devices"><h2>Devices</h2><p>The iOS client manages this automatically. Manual registration accepts a hexadecimal APNs token and <code>sandbox</code> or <code>production</code>.</p>
         <pre>POST /v1/devices
