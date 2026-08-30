@@ -7,6 +7,8 @@ Devcom is a private development companion with two event types:
 
 The repository contains a SwiftUI iOS app in `devcom/` and a TypeScript/Fastify backend in `backend/`.
 
+The deployed API reference is available at `https://devcom.maximkabaev.com/docs`; agents can consume the machine-readable contract at `https://devcom.maximkabaev.com/openapi.json`.
+
 ## V1 security model
 
 - The iOS app signs in with the single owner username/password and keeps its 30-day session in Keychain.

@@ -9,6 +9,7 @@ import { runAction } from "./action-runner.js";
 import { APNSClient } from "./apns.js";
 import { createSession, isAuthorized, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
+import { docsHTML, openApiDocument } from "./docs.js";
 import { Store } from "./store.js";
 import { httpMethods, type ListenEvent } from "./types.js";
 
@@ -57,6 +58,10 @@ const deviceSchema = z.object({
 });
 
 app.get("/health", async () => ({ ok: true }));
+
+app.get("/docs", async (_request, reply) => reply.type("text/html; charset=utf-8").send(docsHTML));
+app.get("/docs/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(docsHTML));
+app.get("/openapi.json", async (_request, reply) => reply.type("application/json").send(openApiDocument));
 
 app.post("/v1/auth/login", { config: { rateLimit: { max: 8, timeWindow: "15 minutes" } } }, async (request, reply) => {
   const parsed = credentialsSchema.safeParse(request.body);
