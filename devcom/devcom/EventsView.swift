@@ -6,9 +6,9 @@ struct EventsView: View {
     @State private var presentedSheet: Sheet?
 
     private enum Sheet: Identifiable {
-        case createAction, createListen, settings
+        case createAction, createListener, settings
         var id: Int {
-            switch self { case .createAction: 0; case .createListen: 1; case .settings: 2 }
+            switch self { case .createAction: 0; case .createListener: 1; case .settings: 2 }
         }
     }
 
@@ -26,7 +26,7 @@ struct EventsView: View {
 
                     Group {
                         if section == .actions { actionsList }
-                        else { listensList }
+                        else { listenersList }
                     }
                     .animation(.easeOut(duration: 0.18), value: section)
                 }
@@ -39,16 +39,16 @@ struct EventsView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        presentedSheet = section == .actions ? .createAction : .createListen
+                        presentedSheet = section == .actions ? .createAction : .createListener
                     } label: { Image(systemName: "plus") }
-                    .accessibilityLabel(section == .actions ? "Create action" : "Create listen event")
+                    .accessibilityLabel(section == .actions ? "Create action" : "Create listener")
                 }
             }
             .refreshable { await model.refresh() }
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
                 case .createAction: ActionEditorView(model: model)
-                case .createListen: ListenEditorView(model: model)
+                case .createListener: ListenerEditorView(model: model)
                 case .settings: SettingsView(model: model)
                 }
             }
@@ -81,20 +81,20 @@ struct EventsView: View {
         }
     }
 
-    @ViewBuilder private var listensList: some View {
-        if model.listens.isEmpty && !model.isLoading {
+    @ViewBuilder private var listenersList: some View {
+        if model.listeners.isEmpty && !model.isLoading {
             ContentUnavailableView(
                 "Nothing listening",
                 systemImage: "arrow.down.left",
-                description: Text("Create a listen event, then POST to its URL from any service.")
+                description: Text("Create a listener, then POST to its URL from any service.")
             )
         } else {
             List {
-                ForEach(model.listens) { listen in
-                    ListenRow(listen: listen)
+                ForEach(model.listeners) { listener in
+                    ListenerRow(listener: listener)
                         .listRowBackground(DevcomTheme.surface)
                         .swipeActions {
-                            Button("Delete", role: .destructive) { Task { await model.deleteListen(listen) } }
+                            Button("Delete", role: .destructive) { Task { await model.deleteListener(listener) } }
                         }
                 }
             }
@@ -134,23 +134,23 @@ private struct ActionRow: View {
     }
 }
 
-private struct ListenRow: View {
-    let listen: ListenEvent
+private struct ListenerRow: View {
+    let listener: Listener
     @State private var copied = false
 
     var body: some View {
         HStack(spacing: 14) {
             signalRail(color: DevcomTheme.inbound, icon: "arrow.down.left")
             VStack(alignment: .leading, spacing: 5) {
-                Text(listen.name).font(.headline).foregroundStyle(DevcomTheme.ink)
-                Text(listen.webhookURL)
+                Text(listener.name).font(.headline).foregroundStyle(DevcomTheme.ink)
+                Text(listener.webhookURL)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(DevcomTheme.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
             Button {
-                UIPasteboard.general.string = listen.webhookURL
+                UIPasteboard.general.string = listener.webhookURL
                 copied = true
                 Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
             } label: {

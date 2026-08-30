@@ -11,7 +11,7 @@ import { createSession, isAuthorized, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { docsHTML, openApiDocument } from "./docs.js";
 import { Store } from "./store.js";
-import { httpMethods, type ListenEvent } from "./types.js";
+import { httpMethods, type Listener } from "./types.js";
 
 const config = loadConfig();
 const store = new Store(config.DATA_FILE, config.CONFIG_ENCRYPTION_KEY);
@@ -35,11 +35,11 @@ async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promis
   }
 }
 
-function webhookURL(event: ListenEvent): string {
+function webhookURL(event: Listener): string {
   return `${config.PUBLIC_URL.replace(/\/$/, "")}/v1/hooks/${event.id}/${event.secret}`;
 }
 
-function publicListen(event: ListenEvent) {
+function publicListener(event: Listener) {
   return { id: event.id, kind: event.kind, name: event.name, webhookURL: webhookURL(event), createdAt: event.createdAt, updatedAt: event.updatedAt };
 }
 
@@ -51,7 +51,7 @@ const actionSchema = z.object({
   headers: z.record(z.string(), z.string().max(8_192)).default({}),
   body: z.string().max(200_000).nullable().default(null)
 });
-const listenSchema = z.object({ name: z.string().trim().min(1).max(80) });
+const listenerSchema = z.object({ name: z.string().trim().min(1).max(80) });
 const deviceSchema = z.object({
   token: z.string().regex(/^[a-fA-F0-9]{64,}$/),
   environment: z.enum(["sandbox", "production"])
@@ -73,7 +73,7 @@ app.post("/v1/auth/login", { config: { rateLimit: { max: 8, timeWindow: "15 minu
 
 app.get("/v1/events", { preHandler: requireAuth }, async () => ({
   actions: store.listActions(),
-  listens: store.listListens().map(publicListen)
+  listeners: store.listListeners().map(publicListener)
 }));
 
 app.post("/v1/actions", { preHandler: requireAuth }, async (request, reply) => {
@@ -102,26 +102,32 @@ app.delete("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply
   return removed ? reply.code(204).send() : reply.code(404).send({ error: "Action not found" });
 });
 
-app.post("/v1/listens", { preHandler: requireAuth }, async (request, reply) => {
-  const parsed = listenSchema.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send({ error: "Invalid listen event", details: parsed.error.flatten() });
+const createListener = async (request: FastifyRequest, reply: FastifyReply) => {
+  const parsed = listenerSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid listener", details: parsed.error.flatten() });
   const timestamp = new Date().toISOString();
-  const event: ListenEvent = {
+  const event: Listener = {
     id: randomUUID(),
-    kind: "listen",
+    kind: "listener",
     name: parsed.data.name,
     secret: randomBytes(32).toString("base64url"),
     createdAt: timestamp,
     updatedAt: timestamp
   };
-  await store.addListen(event);
-  return reply.code(201).send(publicListen(event));
-});
+  await store.addListener(event);
+  return reply.code(201).send(publicListener(event));
+};
 
-app.delete("/v1/listens/:id", { preHandler: requireAuth }, async (request, reply) => {
-  const removed = await store.removeListen((request.params as { id: string }).id);
-  return removed ? reply.code(204).send() : reply.code(404).send({ error: "Listen event not found" });
-});
+app.post("/v1/listeners", { preHandler: requireAuth }, createListener);
+app.post("/v1/listens", { preHandler: requireAuth }, createListener);
+
+const deleteListener = async (request: FastifyRequest, reply: FastifyReply) => {
+  const removed = await store.removeListener((request.params as { id: string }).id);
+  return removed ? reply.code(204).send() : reply.code(404).send({ error: "Listener not found" });
+};
+
+app.delete("/v1/listeners/:id", { preHandler: requireAuth }, deleteListener);
+app.delete("/v1/listens/:id", { preHandler: requireAuth }, deleteListener);
 
 app.post("/v1/devices", { preHandler: requireAuth }, async (request, reply) => {
   const parsed = deviceSchema.safeParse(request.body);
@@ -137,8 +143,8 @@ app.delete("/v1/devices/:token", { preHandler: requireAuth }, async (request, re
 
 app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
   const { id, secret } = request.params as { id: string; secret: string };
-  const event = store.findListen(id);
-  if (!event || event.secret !== secret) return reply.code(404).send({ error: "Listen event not found" });
+  const event = store.findListener(id);
+  if (!event || event.secret !== secret) return reply.code(404).send({ error: "Listener not found" });
 
   const body = request.body;
   const json = body && typeof body === "object" ? body as Record<string, unknown> : undefined;

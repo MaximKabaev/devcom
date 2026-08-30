@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ActionEvent, Device, ListenEvent, StoredData } from "./types.js";
+import type { ActionEvent, Device, Listener, StoredData } from "./types.js";
 
-const emptyData = (): StoredData => ({ version: 1, actions: [], listens: [], devices: [] });
+const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], devices: [] });
 
 export class Store {
   private data: StoredData = emptyData();
@@ -20,7 +20,16 @@ export class Store {
         decipher.update(Buffer.from(envelope.ciphertext, "base64")),
         decipher.final()
       ]);
-      this.data = JSON.parse(plaintext.toString("utf8")) as StoredData;
+      const decoded = JSON.parse(plaintext.toString("utf8")) as StoredData & {
+        listens?: Array<Omit<Listener, "kind"> & { kind: "listen" }>;
+      };
+      const legacyListeners = decoded.listens ?? [];
+      this.data = {
+        version: 1,
+        actions: decoded.actions ?? [],
+        listeners: (decoded.listeners ?? legacyListeners).map((item) => ({ ...item, kind: "listener" })),
+        devices: decoded.devices ?? []
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await this.persist();
@@ -28,18 +37,18 @@ export class Store {
   }
 
   listActions(): ActionEvent[] { return structuredClone(this.data.actions); }
-  listListens(): ListenEvent[] { return structuredClone(this.data.listens); }
+  listListeners(): Listener[] { return structuredClone(this.data.listeners); }
   listDevices(): Device[] { return structuredClone(this.data.devices); }
   findAction(id: string): ActionEvent | undefined { return structuredClone(this.data.actions.find((item) => item.id === id)); }
-  findListen(id: string): ListenEvent | undefined { return structuredClone(this.data.listens.find((item) => item.id === id)); }
+  findListener(id: string): Listener | undefined { return structuredClone(this.data.listeners.find((item) => item.id === id)); }
 
   async addAction(event: ActionEvent): Promise<void> {
     this.data.actions.push(event);
     await this.persist();
   }
 
-  async addListen(event: ListenEvent): Promise<void> {
-    this.data.listens.push(event);
+  async addListener(event: Listener): Promise<void> {
+    this.data.listeners.push(event);
     await this.persist();
   }
 
@@ -50,11 +59,11 @@ export class Store {
     return this.data.actions.length !== before;
   }
 
-  async removeListen(id: string): Promise<boolean> {
-    const before = this.data.listens.length;
-    this.data.listens = this.data.listens.filter((item) => item.id !== id);
-    if (this.data.listens.length !== before) await this.persist();
-    return this.data.listens.length !== before;
+  async removeListener(id: string): Promise<boolean> {
+    const before = this.data.listeners.length;
+    this.data.listeners = this.data.listeners.filter((item) => item.id !== id);
+    if (this.data.listeners.length !== before) await this.persist();
+    return this.data.listeners.length !== before;
   }
 
   async upsertDevice(device: Device): Promise<void> {
@@ -86,4 +95,3 @@ export class Store {
     return this.writeQueue;
   }
 }
-

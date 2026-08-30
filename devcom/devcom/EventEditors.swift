@@ -90,7 +90,7 @@ struct ActionEditorView: View {
     }
 }
 
-struct ListenEditorView: View {
+struct ListenerEditorView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -111,7 +111,7 @@ struct ListenEditorView: View {
                         .foregroundStyle(DevcomTheme.muted)
                 }
             }
-            .navigationTitle("New listen event")
+            .navigationTitle("New listener")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -119,7 +119,7 @@ struct ListenEditorView: View {
                     Button(isSaving ? "Saving…" : "Save") {
                         isSaving = true
                         Task {
-                            let saved = await model.createListen(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+                            let saved = await model.createListener(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
                             isSaving = false
                             if saved { dismiss() }
                         }

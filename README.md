@@ -3,7 +3,7 @@
 Devcom is a private development companion with two event types:
 
 - **Actions** call a saved HTTP endpoint from the VPS when you tap Run in the iOS app.
-- **Listens** expose a secret webhook URL. A POST to that URL becomes an Apple push notification whose title and message come from the request.
+- **Listeners** expose a secret webhook URL. A POST to that URL becomes an Apple push notification whose title and message come from the request.
 
 The repository contains a SwiftUI iOS app in `devcom/` and a TypeScript/Fastify backend in `backend/`.
 
@@ -13,7 +13,7 @@ The deployed API reference is available at `https://devcom.maximkabaev.com/docs`
 
 - The iOS app signs in with the single owner username/password and keeps its 30-day session in Keychain.
 - Automation uses a separate, long random `AGENT_API_TOKEN`. It has owner-level event access, so only give it to trusted agents.
-- Every listen event has an unguessable 256-bit secret in its webhook URL. No account token is required when calling that URL.
+- Every listener has an unguessable 256-bit secret in its webhook URL. No account token is required when calling that URL.
 - Saved action configuration, including headers and bodies, is AES-256-GCM encrypted on disk.
 - The server binds to localhost in `compose.yaml`; put an HTTPS reverse proxy in front of it.
 - Redirects are not followed when an action runs, requests time out after 15 seconds, and response previews stop at 64 KB.
@@ -79,10 +79,10 @@ POST /v1/actions
 
 The returned `id` can be invoked with `POST /v1/actions/{id}/run`.
 
-Create a listen event:
+Create a listener:
 
 ```http
-POST /v1/listens
+POST /v1/listeners
 
 {
   "name": "Deploy finished"
@@ -113,8 +113,8 @@ Alternatively, send any plain-text body and set `X-Devcom-Title`; or set both `X
 | `POST` | `/v1/actions` | Owner or agent bearer token | Create an action |
 | `POST` | `/v1/actions/:id/run` | Owner or agent bearer token | Run an action |
 | `DELETE` | `/v1/actions/:id` | Owner or agent bearer token | Delete an action |
-| `POST` | `/v1/listens` | Owner or agent bearer token | Create a listen event |
-| `DELETE` | `/v1/listens/:id` | Owner or agent bearer token | Delete a listen event |
+| `POST` | `/v1/listeners` | Owner or agent bearer token | Create a listener |
+| `DELETE` | `/v1/listeners/:id` | Owner or agent bearer token | Delete a listener |
 | `POST` | `/v1/devices` | Owner or agent bearer token | Register an APNs device |
 | `POST` | `/v1/hooks/:id/:secret` | Secret URL | Send a push notification |
 

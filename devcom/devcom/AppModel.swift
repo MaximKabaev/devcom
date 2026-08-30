@@ -8,7 +8,7 @@ import UserNotifications
 final class AppModel {
     private(set) var isAuthenticated = false
     private(set) var actions: [ActionEvent] = []
-    private(set) var listens: [ListenEvent] = []
+    private(set) var listeners: [Listener] = []
     private(set) var isLoading = false
     private(set) var runningActionID: String?
     var errorMessage: String?
@@ -57,7 +57,7 @@ final class AppModel {
         KeychainStore.clear()
         client = nil
         actions = []
-        listens = []
+        listeners = []
         isAuthenticated = false
     }
 
@@ -68,7 +68,7 @@ final class AppModel {
         do {
             let response = try await client.events()
             actions = response.actions
-            listens = response.listens
+            listeners = response.listeners
             errorMessage = nil
         } catch APIError.unauthorized {
             logout()
@@ -86,10 +86,10 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription; return false }
     }
 
-    func createListen(name: String) async -> Bool {
+    func createListener(name: String) async -> Bool {
         guard let client else { return false }
         do {
-            listens.append(try await client.createListen(name: name))
+            listeners.append(try await client.createListener(name: name))
             errorMessage = nil
             return true
         } catch { errorMessage = error.localizedDescription; return false }
@@ -109,9 +109,9 @@ final class AppModel {
         catch { errorMessage = error.localizedDescription }
     }
 
-    func deleteListen(_ listen: ListenEvent) async {
+    func deleteListener(_ listener: Listener) async {
         guard let client else { return }
-        do { try await client.deleteListen(id: listen.id); listens.removeAll { $0.id == listen.id } }
+        do { try await client.deleteListener(id: listener.id); listeners.removeAll { $0.id == listener.id } }
         catch { errorMessage = error.localizedDescription }
     }
 

@@ -3,7 +3,7 @@ export const openApiDocument = {
   info: {
     title: "Devcom API",
     version: "0.1.0",
-    description: "Create and run outbound action events, or create inbound listen events that deliver APNs notifications."
+    description: "Create and run outbound action events, or create listeners that deliver inbound APNs notifications."
   },
   servers: [{ url: "https://devcom.maximkabaev.com" }],
   tags: [
@@ -11,7 +11,7 @@ export const openApiDocument = {
     { name: "Authentication" },
     { name: "Events" },
     { name: "Actions" },
-    { name: "Listens" },
+    { name: "Listeners" },
     { name: "Devices" }
   ],
   components: {
@@ -39,7 +39,7 @@ export const openApiDocument = {
           body: { type: ["string", "null"], maxLength: 200000, default: null }
         }
       },
-      ListenInput: {
+      ListenerInput: {
         type: "object",
         required: ["name"],
         properties: { name: { type: "string", maxLength: 80 } }
@@ -87,7 +87,7 @@ export const openApiDocument = {
     "/v1/events": {
       get: {
         tags: ["Events"],
-        summary: "List action and listen events",
+        summary: "List actions and listeners",
         security: [{ bearerAuth: [] }],
         responses: { "200": { description: "Both event collections." }, "401": { description: "Bearer token required." } }
       }
@@ -119,22 +119,22 @@ export const openApiDocument = {
         responses: { "204": { description: "Deleted." }, "404": { description: "Action not found." } }
       }
     },
-    "/v1/listens": {
+    "/v1/listeners": {
       post: {
-        tags: ["Listens"],
-        summary: "Create an inbound listen event",
+        tags: ["Listeners"],
+        summary: "Create an inbound listener",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ListenInput" } } } },
-        responses: { "201": { description: "The listen event and its secret webhookURL." } }
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ListenerInput" } } } },
+        responses: { "201": { description: "The listener and its secret webhookURL." } }
       }
     },
-    "/v1/listens/{id}": {
+    "/v1/listeners/{id}": {
       delete: {
-        tags: ["Listens"],
-        summary: "Delete a listen event",
+        tags: ["Listeners"],
+        summary: "Delete a listener",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
-        responses: { "204": { description: "Deleted." }, "404": { description: "Listen event not found." } }
+        responses: { "204": { description: "Deleted." }, "404": { description: "Listener not found." } }
       }
     },
     "/v1/devices": {
@@ -157,8 +157,8 @@ export const openApiDocument = {
     },
     "/v1/hooks/{id}/{secret}": {
       post: {
-        tags: ["Listens"],
-        summary: "Deliver a listen event as a push notification",
+        tags: ["Listeners"],
+        summary: "Deliver a push notification through a listener",
         description: "The URL secret is the credential. JSON, plain text, X-Devcom-Title, and X-Devcom-Message are accepted.",
         parameters: [
           { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -224,29 +224,29 @@ export const docsHTML = `<!doctype html>
     <div class="signal" aria-hidden="true"><span class="out"></span><span class="in"></span></div>
     <div class="eyebrow">DEVCOM / HTTP CONTRACT / V1</div>
     <h1>Send commands.<br>Receive signals.</h1>
-    <p class="lede">The complete public contract for wiring services and agents into Devcom. Use actions for outbound HTTP calls and listens for inbound push notifications.</p>
+    <p class="lede">The complete public contract for wiring services and agents into Devcom. Use actions for outbound HTTP calls and listeners for inbound push notifications.</p>
     <div class="links"><a href="/openapi.json">OpenAPI JSON</a><a href="/health">Service health</a></div>
   </div></header>
   <main class="shell">
-    <nav aria-label="Documentation"><a href="#auth">Authentication</a><a href="#map">Endpoint map</a><a href="#actions">Actions</a><a href="#listens">Listens</a><a href="#devices">Devices</a><a href="#limits">Limits</a></nav>
+    <nav aria-label="Documentation"><a href="#auth">Authentication</a><a href="#map">Endpoint map</a><a href="#actions">Actions</a><a href="#listeners">Listeners</a><a href="#devices">Devices</a><a href="#limits">Limits</a></nav>
     <article>
       <section id="auth"><h2>Authentication</h2>
         <p>Management endpoints accept either the long-lived agent token or an owner session JWT:</p>
         <pre>Authorization: Bearer YOUR_AGENT_API_TOKEN
 Content-Type: application/json</pre>
         <p>Agents should use <code>AGENT_API_TOKEN</code>. The iOS app obtains a 30-day owner token from <code>POST /v1/auth/login</code>.</p>
-        <p class="note">Treat the agent token and each listen webhook URL as credentials. Do not place either value in public logs, issues, or documentation.</p>
+        <p class="note">Treat the agent token and each listener webhook URL as credentials. Do not place either value in public logs, issues, or documentation.</p>
       </section>
       <section id="map"><h2>Endpoint map</h2>
         <table><thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Purpose</th></tr></thead><tbody>
           <tr><td class="method">GET</td><td><code>/health</code></td><td>Public</td><td>Service health</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/auth/login</code></td><td>Credentials</td><td>Create owner session</td></tr>
-          <tr><td class="method">GET</td><td><code>/v1/events</code></td><td>Bearer</td><td>List actions and listens</td></tr>
+          <tr><td class="method">GET</td><td><code>/v1/events</code></td><td>Bearer</td><td>List actions and listeners</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions</code></td><td>Bearer</td><td>Create an action</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions/:id/run</code></td><td>Bearer</td><td>Run an action</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/actions/:id</code></td><td>Bearer</td><td>Delete an action</td></tr>
-          <tr><td class="method">POST</td><td><code>/v1/listens</code></td><td>Bearer</td><td>Create a listen URL</td></tr>
-          <tr><td class="method">DELETE</td><td><code>/v1/listens/:id</code></td><td>Bearer</td><td>Delete a listen</td></tr>
+          <tr><td class="method">POST</td><td><code>/v1/listeners</code></td><td>Bearer</td><td>Create a listener</td></tr>
+          <tr><td class="method">DELETE</td><td><code>/v1/listeners/:id</code></td><td>Bearer</td><td>Delete a listener</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>Deliver a push</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/devices</code></td><td>Bearer</td><td>Register APNs device</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/devices/:token</code></td><td>Bearer</td><td>Remove APNs device</td></tr>
@@ -267,8 +267,8 @@ Content-Type: application/json</pre>
   -H "Authorization: Bearer $AGENT_API_TOKEN"</pre>
         <p>Run responses include <code>ok</code>, upstream <code>status</code>, <code>durationMs</code>, <code>response</code>, and <code>truncated</code>. Redirects are returned without being followed.</p>
       </section>
-      <section id="listens"><h2>Listens</h2><p>Create a listen once, then give its returned <code>webhookURL</code> to the source service.</p>
-        <h3>Create</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/listens \\
+      <section id="listeners"><h2>Listeners</h2><p>Create a listener once, then give its returned <code>webhookURL</code> to the source service.</p>
+        <h3>Create</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/listeners \\
   -H "Authorization: Bearer $AGENT_API_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"name":"Deploy finished"}'</pre>

@@ -51,8 +51,8 @@ actor APIClient {
         )
     }
 
-    func createListen(name: String) async throws -> ListenEvent {
-        try await request(path: "/v1/listens", method: "POST", body: ["name": name])
+    func createListener(name: String) async throws -> Listener {
+        try await request(path: "/v1/listeners", method: "POST", body: ["name": name])
     }
 
     func runAction(id: String) async throws -> ActionRunResult {
@@ -63,8 +63,8 @@ actor APIClient {
         try await requestWithoutResponse(path: "/v1/actions/\(id)", method: "DELETE")
     }
 
-    func deleteListen(id: String) async throws {
-        try await requestWithoutResponse(path: "/v1/listens/\(id)", method: "DELETE")
+    func deleteListener(id: String) async throws {
+        try await requestWithoutResponse(path: "/v1/listeners/\(id)", method: "DELETE")
     }
 
     func registerDevice(token deviceToken: String) async throws {

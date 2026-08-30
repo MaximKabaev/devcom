@@ -12,7 +12,7 @@ nonisolated struct ActionEvent: Codable, Identifiable, Sendable {
     let updatedAt: String
 }
 
-nonisolated struct ListenEvent: Codable, Identifiable, Sendable {
+nonisolated struct Listener: Codable, Identifiable, Sendable {
     let id: String
     let kind: String
     let name: String
@@ -23,7 +23,7 @@ nonisolated struct ListenEvent: Codable, Identifiable, Sendable {
 
 nonisolated struct EventsResponse: Codable, Sendable {
     let actions: [ActionEvent]
-    let listens: [ListenEvent]
+    let listeners: [Listener]
 }
 
 nonisolated struct LoginResponse: Codable, Sendable { let token: String }
@@ -45,6 +45,6 @@ nonisolated struct StoredSession: Codable, Sendable {
 
 enum EventSection: String, CaseIterable, Identifiable {
     case actions = "Actions"
-    case listens = "Listens"
+    case listeners = "Listeners"
     var id: String { rawValue }
 }

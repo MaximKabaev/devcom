@@ -13,9 +13,9 @@ export interface ActionEvent {
   updatedAt: string;
 }
 
-export interface ListenEvent {
+export interface Listener {
   id: string;
-  kind: "listen";
+  kind: "listener";
   name: string;
   secret: string;
   createdAt: string;
@@ -31,7 +31,6 @@ export interface Device {
 export interface StoredData {
   version: 1;
   actions: ActionEvent[];
-  listens: ListenEvent[];
+  listeners: Listener[];
   devices: Device[];
 }
-

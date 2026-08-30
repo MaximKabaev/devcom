@@ -10,7 +10,7 @@ struct SettingsView: View {
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                     LabeledContent("Action events", value: "\(model.actions.count)")
-                    LabeledContent("Listen events", value: "\(model.listens.count)")
+                    LabeledContent("Listeners", value: "\(model.listeners.count)")
                 }
                 Section {
                     Button("Disconnect", role: .destructive) {
@@ -27,4 +27,3 @@ struct SettingsView: View {
         }
     }
 }
-
