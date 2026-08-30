@@ -22,11 +22,11 @@ Action URLs are intentionally allowed to reach private networks because calling 
 
 ## Backend setup
 
-Requirements: Docker Compose, a public HTTPS hostname, and an Apple Push Notification service key (`.p8`).
+Requirements: Docker Compose, a public HTTPS hostname, and Apple Push Notification service keys (`.p8`) for the environments you use.
 
 1. Copy `backend/.env.example` to `backend/.env`.
 2. Set all required values. Generate the secrets using the commands documented in that file, and create the password hash with the documented bcrypt command.
-3. Create `backend/secrets`, copy the Apple `.p8` key to `backend/secrets/AuthKey.p8`, and set the Apple team ID, key ID, and app bundle ID. Compose mounts that directory read-only at `/run/secrets`; the example environment already points there.
+3. Create `backend/secrets`, copy the Sandbox and Production `.p8` keys there, and set their environment-specific key IDs plus the Apple team ID and app bundle ID. Compose mounts that directory read-only at `/run/secrets`; the example environment points at `AuthKey-sandbox.p8` and `AuthKey-production.p8`. Legacy APNs keys valid in both environments can instead use the fallback `APNS_KEY_ID` and `APNS_PRIVATE_KEY` settings.
 4. Point `PUBLIC_URL` at the public HTTPS origin with no path, for example `https://devcom.example.com`.
 5. Have your reverse proxy forward that hostname to `127.0.0.1:8080`, preserving the request body and `X-Devcom-*` headers.
 6. Start the Compose project yourself with `docker compose up -d --build`.

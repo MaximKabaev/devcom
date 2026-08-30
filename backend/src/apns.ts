@@ -6,6 +6,8 @@ import type { Device } from "./types.js";
 
 interface PushMessage { title: string; body: string }
 export interface PushResult { token: string; delivered: boolean; invalidToken: boolean; reason?: string }
+type APNSEnvironment = Device["environment"];
+interface APNSCredentials { keyId: string; privateKey: string }
 
 function notificationPayload(message: PushMessage): string {
   const body = Array.from(message.body);
@@ -18,23 +20,26 @@ function notificationPayload(message: PushMessage): string {
 }
 
 export class APNSClient {
-  private key?: CryptoKey;
-  private providerToken?: { value: string; createdAt: number };
+  private readonly keys = new Map<string, CryptoKey>();
+  private readonly providerTokens = new Map<string, { value: string; createdAt: number }>();
 
   constructor(private readonly config: Config) {}
 
-  isConfigured(): boolean {
-    return Boolean(
-      this.config.APNS_TEAM_ID &&
-      this.config.APNS_KEY_ID &&
-      this.config.APNS_BUNDLE_ID &&
-      this.config.APNS_PRIVATE_KEY
-    );
+  isConfigured(environment?: APNSEnvironment): boolean {
+    if (!this.config.APNS_TEAM_ID || !this.config.APNS_BUNDLE_ID) return false;
+    if (environment) return Boolean(this.credentialsFor(environment));
+    return Boolean(this.credentialsFor("sandbox") || this.credentialsFor("production"));
   }
 
   async send(device: Device, message: PushMessage): Promise<PushResult> {
-    if (!this.isConfigured()) {
-      return { token: device.token, delivered: false, invalidToken: false, reason: "APNs is not configured" };
+    const credentials = this.credentialsFor(device.environment);
+    if (!this.isConfigured(device.environment) || !credentials) {
+      return {
+        token: device.token,
+        delivered: false,
+        invalidToken: false,
+        reason: `APNs is not configured for ${device.environment}`
+      };
     }
 
     const host = device.environment === "production"
@@ -43,31 +48,51 @@ export class APNSClient {
     const client = connect(host);
     client.on("error", () => {});
     try {
-      const token = await this.getProviderToken();
+      const token = await this.getProviderToken(credentials);
       return await this.performRequest(client, device.token, token, message);
     } finally {
       client.close();
     }
   }
 
-  private async getProviderToken(): Promise<string> {
-    const now = Math.floor(Date.now() / 1000);
-    if (this.providerToken && now - this.providerToken.createdAt < 50 * 60) return this.providerToken.value;
+  private credentialsFor(environment: APNSEnvironment): APNSCredentials | undefined {
+    const environmentKeyId = environment === "sandbox"
+      ? this.config.APNS_SANDBOX_KEY_ID
+      : this.config.APNS_PRODUCTION_KEY_ID;
+    const environmentPrivateKey = environment === "sandbox"
+      ? this.config.APNS_SANDBOX_PRIVATE_KEY
+      : this.config.APNS_PRODUCTION_PRIVATE_KEY;
+    if (environmentKeyId && environmentPrivateKey) {
+      return { keyId: environmentKeyId, privateKey: environmentPrivateKey };
+    }
+    if (this.config.APNS_KEY_ID && this.config.APNS_PRIVATE_KEY) {
+      return { keyId: this.config.APNS_KEY_ID, privateKey: this.config.APNS_PRIVATE_KEY };
+    }
+    return undefined;
+  }
 
-    if (!this.key) {
-      const configuredKey = this.config.APNS_PRIVATE_KEY!;
+  private async getProviderToken(credentials: APNSCredentials): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const cacheKey = `${credentials.keyId}:${credentials.privateKey}`;
+    const providerToken = this.providerTokens.get(cacheKey);
+    if (providerToken && now - providerToken.createdAt < 50 * 60) return providerToken.value;
+
+    let key = this.keys.get(cacheKey);
+    if (!key) {
+      const configuredKey = credentials.privateKey;
       const pem = configuredKey.includes("BEGIN PRIVATE KEY")
         ? configuredKey.replaceAll("\\n", "\n")
         : await readFile(configuredKey, "utf8");
-      this.key = await importPKCS8(pem, "ES256");
+      key = await importPKCS8(pem, "ES256");
+      this.keys.set(cacheKey, key);
     }
 
     const value = await new SignJWT({})
-      .setProtectedHeader({ alg: "ES256", kid: this.config.APNS_KEY_ID! })
+      .setProtectedHeader({ alg: "ES256", kid: credentials.keyId })
       .setIssuer(this.config.APNS_TEAM_ID!)
       .setIssuedAt(now)
-      .sign(this.key);
-    this.providerToken = { value, createdAt: now };
+      .sign(key);
+    this.providerTokens.set(cacheKey, { value, createdAt: now });
     return value;
   }
 

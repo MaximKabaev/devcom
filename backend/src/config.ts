@@ -27,7 +27,11 @@ const schema = z.object({
   APNS_TEAM_ID: z.string().optional(),
   APNS_KEY_ID: z.string().optional(),
   APNS_BUNDLE_ID: z.string().optional(),
-  APNS_PRIVATE_KEY: z.string().optional()
+  APNS_PRIVATE_KEY: z.string().optional(),
+  APNS_SANDBOX_KEY_ID: z.string().optional(),
+  APNS_SANDBOX_PRIVATE_KEY: z.string().optional(),
+  APNS_PRODUCTION_KEY_ID: z.string().optional(),
+  APNS_PRODUCTION_PRIVATE_KEY: z.string().optional()
 });
 
 export type Config = z.infer<typeof schema>;
@@ -40,4 +44,3 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config
   }
   return parsed.data;
 }
-
