@@ -3,13 +3,21 @@ import SwiftUI
 struct EventsView: View {
     @Bindable var model: AppModel
     @State private var section: EventSection = .actions
+    @State private var projectFilter: ProjectFilter = .all
     @State private var presentedSheet: Sheet?
+
+    private enum ProjectFilter: Hashable {
+        case all
+        case project(String)
+        case unfiled
+    }
 
     private enum Sheet: Identifiable {
         case createAction
         case createListener
         case editAction(ActionEvent)
         case editListener(Listener)
+        case projects
         case settings
 
         var id: String {
@@ -18,6 +26,7 @@ struct EventsView: View {
             case .createListener: "create-listener"
             case .editAction(let action): "edit-action-\(action.id)"
             case .editListener(let listener): "edit-listener-\(listener.id)"
+            case .projects: "projects"
             case .settings: "settings"
             }
         }
@@ -33,7 +42,12 @@ struct EventsView: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
+                    .padding(.top, 14)
+                    .padding(.bottom, model.projects.isEmpty ? 14 : 10)
+
+                    if !model.projects.isEmpty {
+                        projectBar
+                    }
 
                     Group {
                         if section == .actions { actionsList }
@@ -45,8 +59,10 @@ struct EventsView: View {
             .navigationTitle("DEVCOM")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button { presentedSheet = .settings } label: { Image(systemName: "slider.horizontal.3") }
+                    Button { presentedSheet = .projects } label: { Image(systemName: "folder") }
+                        .accessibilityLabel("Manage projects")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -58,31 +74,92 @@ struct EventsView: View {
             .refreshable { await model.refresh() }
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
-                case .createAction: ActionEditorView(model: model)
-                case .createListener: ListenerEditorView(model: model)
+                case .createAction: ActionEditorView(model: model, initialProjectId: activeProjectId)
+                case .createListener: ListenerEditorView(model: model, initialProjectId: activeProjectId)
                 case .editAction(let action): ActionEditorView(model: model, action: action)
                 case .editListener(let listener): ListenerEditorView(model: model, listener: listener)
+                case .projects: ProjectManagerView(model: model)
                 case .settings: SettingsView(model: model)
                 }
             }
             .sheet(item: $model.runResult) { result in ActionResultView(result: result) }
             .devcomErrorAlert(model: model)
+            .onChange(of: model.projects.map(\.id)) { _, projectIDs in
+                if case .project(let id) = projectFilter, !projectIDs.contains(id) { projectFilter = .all }
+            }
         }
         .tint(section == .actions ? DevcomTheme.outbound : DevcomTheme.inbound)
     }
 
+    private var filteredActions: [ActionEvent] {
+        model.actions.filter { matches(projectId: $0.projectId) }
+    }
+
+    private var activeProjectId: String? {
+        if case .project(let id) = projectFilter { return id }
+        return nil
+    }
+
+    private var filteredListeners: [Listener] {
+        model.listeners.filter { matches(projectId: $0.projectId) }
+    }
+
+    private func matches(projectId: String?) -> Bool {
+        switch projectFilter {
+        case .all: true
+        case .project(let id): projectId == id
+        case .unfiled: projectId == nil
+        }
+    }
+
+    private func project(for projectId: String?) -> Project? {
+        guard let projectId else { return nil }
+        return model.projects.first { $0.id == projectId }
+    }
+
+    private var projectBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                projectFilterButton(title: "All", color: DevcomTheme.muted, filter: .all)
+                ForEach(model.projects) { project in
+                    projectFilterButton(title: project.name, color: project.color.tint, filter: .project(project.id))
+                }
+                projectFilterButton(title: "Unfiled", color: DevcomTheme.muted, filter: .unfiled)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+        }
+    }
+
+    private func projectFilterButton(title: String, color: Color, filter: ProjectFilter) -> some View {
+        let selected = projectFilter == filter
+        return Button { projectFilter = filter } label: {
+            HStack(spacing: 7) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(title).font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(selected ? DevcomTheme.ink : DevcomTheme.muted)
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background(selected ? color.opacity(0.14) : DevcomTheme.surface, in: Capsule())
+            .overlay(Capsule().stroke(selected ? color.opacity(0.28) : DevcomTheme.muted.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder private var actionsList: some View {
-        if model.actions.isEmpty && !model.isLoading {
+        if filteredActions.isEmpty && !model.isLoading {
             ContentUnavailableView(
-                "No actions yet",
-                systemImage: "arrow.up.right",
-                description: Text("Create an action to call a service from this phone.")
+                model.actions.isEmpty ? "No actions yet" : "No actions here",
+                systemImage: model.actions.isEmpty ? "arrow.up.right" : "folder",
+                description: Text(model.actions.isEmpty ? "Create an action to call a service from this phone." : "Assign an action to this project from its configuration screen.")
             )
         } else {
             List {
-                ForEach(model.actions) { action in
+                ForEach(filteredActions) { action in
                     ActionRow(
                         action: action,
+                        project: project(for: action.projectId),
                         isRunning: model.runningActionID == action.id,
                         edit: { presentedSheet = .editAction(action) },
                         run: { Task { await model.run(action) } }
@@ -98,16 +175,16 @@ struct EventsView: View {
     }
 
     @ViewBuilder private var listenersList: some View {
-        if model.listeners.isEmpty && !model.isLoading {
+        if filteredListeners.isEmpty && !model.isLoading {
             ContentUnavailableView(
-                "Nothing listening",
-                systemImage: "arrow.down.left",
-                description: Text("Create a listener, then POST to its URL from any service.")
+                model.listeners.isEmpty ? "Nothing listening" : "No listeners here",
+                systemImage: model.listeners.isEmpty ? "arrow.down.left" : "folder",
+                description: Text(model.listeners.isEmpty ? "Create a listener, then POST to its URL from any service." : "Assign a listener to this project from its configuration screen.")
             )
         } else {
             List {
-                ForEach(model.listeners) { listener in
-                    ListenerRow(listener: listener, edit: { presentedSheet = .editListener(listener) })
+                ForEach(filteredListeners) { listener in
+                    ListenerRow(listener: listener, project: project(for: listener.projectId), edit: { presentedSheet = .editListener(listener) })
                         .listRowBackground(DevcomTheme.surface)
                         .swipeActions {
                             Button("Delete", role: .destructive) { Task { await model.deleteListener(listener) } }
@@ -121,6 +198,7 @@ struct EventsView: View {
 
 private struct ActionRow: View {
     let action: ActionEvent
+    let project: Project?
     let isRunning: Bool
     let edit: () -> Void
     let run: () -> Void
@@ -136,6 +214,7 @@ private struct ActionRow: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(DevcomTheme.muted)
                             .lineLimit(1)
+                        if let project { ProjectTag(project: project) }
                     }
                     Spacer(minLength: 6)
                     Image(systemName: "chevron.right")
@@ -163,6 +242,7 @@ private struct ActionRow: View {
 
 private struct ListenerRow: View {
     let listener: Listener
+    let project: Project?
     let edit: () -> Void
     @State private var copied = false
 
@@ -177,6 +257,7 @@ private struct ListenerRow: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(DevcomTheme.muted)
                             .lineLimit(1)
+                        if let project { ProjectTag(project: project) }
                     }
                     Spacer(minLength: 6)
                     Image(systemName: "chevron.right")
@@ -202,6 +283,19 @@ private struct ListenerRow: View {
             .accessibilityLabel(copied ? "Copied" : "Copy webhook URL")
         }
         .padding(.vertical, 7)
+    }
+}
+
+private struct ProjectTag: View {
+    let project: Project
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(project.color.tint).frame(width: 6, height: 6)
+            Text(project.name)
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(DevcomTheme.muted)
     }
 }
 

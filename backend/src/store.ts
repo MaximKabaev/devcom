@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ActionEvent, Device, Listener, StoredData } from "./types.js";
+import type { ActionEvent, Device, Listener, Project, StoredData } from "./types.js";
 
-const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], devices: [] });
+const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], projects: [], devices: [] });
 
 export class Store {
   private data: StoredData = emptyData();
@@ -26,8 +26,9 @@ export class Store {
       const legacyListeners = decoded.listens ?? [];
       this.data = {
         version: 1,
-        actions: decoded.actions ?? [],
-        listeners: (decoded.listeners ?? legacyListeners).map((item) => ({ ...item, kind: "listener" })),
+        actions: (decoded.actions ?? []).map((item) => ({ ...item, projectId: item.projectId ?? null })),
+        listeners: (decoded.listeners ?? legacyListeners).map((item) => ({ ...item, kind: "listener", projectId: item.projectId ?? null })),
+        projects: decoded.projects ?? [],
         devices: decoded.devices ?? []
       };
     } catch (error) {
@@ -38,9 +39,11 @@ export class Store {
 
   listActions(): ActionEvent[] { return structuredClone(this.data.actions); }
   listListeners(): Listener[] { return structuredClone(this.data.listeners); }
+  listProjects(): Project[] { return structuredClone(this.data.projects); }
   listDevices(): Device[] { return structuredClone(this.data.devices); }
   findAction(id: string): ActionEvent | undefined { return structuredClone(this.data.actions.find((item) => item.id === id)); }
   findListener(id: string): Listener | undefined { return structuredClone(this.data.listeners.find((item) => item.id === id)); }
+  findProject(id: string): Project | undefined { return structuredClone(this.data.projects.find((item) => item.id === id)); }
 
   async addAction(event: ActionEvent): Promise<void> {
     this.data.actions.push(event);
@@ -52,9 +55,14 @@ export class Store {
     await this.persist();
   }
 
+  async addProject(project: Project): Promise<void> {
+    this.data.projects.push(project);
+    await this.persist();
+  }
+
   async updateAction(
     id: string,
-    update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body">>
+    update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId">>
   ): Promise<ActionEvent | undefined> {
     const index = this.data.actions.findIndex((item) => item.id === id);
     const current = this.data.actions[index];
@@ -65,12 +73,28 @@ export class Store {
     return structuredClone(updated);
   }
 
-  async updateListener(id: string, update: Pick<Listener, "name">): Promise<Listener | undefined> {
+  async updateListener(
+    id: string,
+    update: Pick<Listener, "name"> & Partial<Pick<Listener, "projectId">>
+  ): Promise<Listener | undefined> {
     const index = this.data.listeners.findIndex((item) => item.id === id);
     const current = this.data.listeners[index];
     if (index < 0 || !current) return undefined;
     const updated: Listener = { ...current, ...update, updatedAt: new Date().toISOString() };
     this.data.listeners[index] = updated;
+    await this.persist();
+    return structuredClone(updated);
+  }
+
+  async updateProject(
+    id: string,
+    update: Partial<Pick<Project, "name" | "color">>
+  ): Promise<Project | undefined> {
+    const index = this.data.projects.findIndex((item) => item.id === id);
+    const current = this.data.projects[index];
+    if (index < 0 || !current) return undefined;
+    const updated: Project = { ...current, ...update, updatedAt: new Date().toISOString() };
+    this.data.projects[index] = updated;
     await this.persist();
     return structuredClone(updated);
   }
@@ -87,6 +111,17 @@ export class Store {
     this.data.listeners = this.data.listeners.filter((item) => item.id !== id);
     if (this.data.listeners.length !== before) await this.persist();
     return this.data.listeners.length !== before;
+  }
+
+  async removeProject(id: string): Promise<boolean> {
+    const before = this.data.projects.length;
+    this.data.projects = this.data.projects.filter((item) => item.id !== id);
+    if (this.data.projects.length === before) return false;
+    const timestamp = new Date().toISOString();
+    this.data.actions = this.data.actions.map((item) => item.projectId === id ? { ...item, projectId: null, updatedAt: timestamp } : item);
+    this.data.listeners = this.data.listeners.map((item) => item.projectId === id ? { ...item, projectId: null, updatedAt: timestamp } : item);
+    await this.persist();
+    return true;
   }
 
   async upsertDevice(device: Device): Promise<void> {

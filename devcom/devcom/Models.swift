@@ -8,6 +8,7 @@ nonisolated struct ActionEvent: Codable, Identifiable, Sendable {
     let url: String
     let headers: [String: String]
     let body: String?
+    let projectId: String?
     let createdAt: String
     let updatedAt: String
 }
@@ -17,6 +18,20 @@ nonisolated struct Listener: Codable, Identifiable, Sendable {
     let kind: String
     let name: String
     let webhookURL: String
+    let projectId: String?
+    let createdAt: String
+    let updatedAt: String
+}
+
+nonisolated enum ProjectColor: String, Codable, CaseIterable, Identifiable, Sendable {
+    case blue, violet, mint, amber, rose, slate
+    var id: String { rawValue }
+}
+
+nonisolated struct Project: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let color: ProjectColor
     let createdAt: String
     let updatedAt: String
 }
@@ -24,6 +39,7 @@ nonisolated struct Listener: Codable, Identifiable, Sendable {
 nonisolated struct EventsResponse: Codable, Sendable {
     let actions: [ActionEvent]
     let listeners: [Listener]
+    let projects: [Project]
 }
 
 nonisolated struct LoginResponse: Codable, Sendable { let token: String }

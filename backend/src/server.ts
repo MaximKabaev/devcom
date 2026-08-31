@@ -7,11 +7,11 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runAction } from "./action-runner.js";
 import { APNSClient } from "./apns.js";
-import { createSession, isAuthorized, verifyPassword } from "./auth.js";
+import { createSession, isAuthorized, isOwner, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { docsHTML, openApiDocument } from "./docs.js";
 import { Store } from "./store.js";
-import { httpMethods, type ActionEvent, type Listener } from "./types.js";
+import { httpMethods, projectColors, type ActionEvent, type Listener, type Project } from "./types.js";
 
 const config = loadConfig();
 const store = new Store(config.DATA_FILE, config.CONFIG_ENCRYPTION_KEY);
@@ -35,12 +35,26 @@ async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promis
   }
 }
 
+async function requireOwner(request: FastifyRequest, reply: FastifyReply): Promise<void | FastifyReply> {
+  if (!(await isOwner(request.headers.authorization, config))) {
+    return reply.code(401).send({ error: "Owner session required" });
+  }
+}
+
 function webhookURL(event: Listener): string {
   return `${config.PUBLIC_URL.replace(/\/$/, "")}/v1/hooks/${event.id}/${event.secret}`;
 }
 
 function publicListener(event: Listener) {
-  return { id: event.id, kind: event.kind, name: event.name, webhookURL: webhookURL(event), createdAt: event.createdAt, updatedAt: event.updatedAt };
+  return {
+    id: event.id,
+    kind: event.kind,
+    name: event.name,
+    webhookURL: webhookURL(event),
+    projectId: event.projectId,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt
+  };
 }
 
 const credentialsSchema = z.object({ username: z.string().min(1), password: z.string().min(1).max(256) });
@@ -49,10 +63,19 @@ const actionSchema = z.object({
   method: z.enum(httpMethods),
   url: z.string().url().refine((url) => url.startsWith("http://") || url.startsWith("https://"), "Only HTTP(S) URLs are supported"),
   headers: z.record(z.string(), z.string().max(8_192)).default({}),
-  body: z.string().max(200_000).nullable().default(null)
+  body: z.string().max(200_000).nullable().default(null),
+  projectId: z.string().uuid().nullable().optional()
 });
 const actionUpdateSchema = actionSchema.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
-const listenerSchema = z.object({ name: z.string().trim().min(1).max(80) });
+const listenerSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  projectId: z.string().uuid().nullable().optional()
+});
+const projectSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  color: z.enum(projectColors)
+});
+const projectUpdateSchema = projectSchema.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
 const deviceSchema = z.object({
   token: z.string().regex(/^[a-fA-F0-9]{64,}$/),
   environment: z.enum(["sandbox", "production"])
@@ -74,14 +97,48 @@ app.post("/v1/auth/login", { config: { rateLimit: { max: 8, timeWindow: "15 minu
 
 app.get("/v1/events", { preHandler: requireAuth }, async () => ({
   actions: store.listActions(),
-  listeners: store.listListeners().map(publicListener)
+  listeners: store.listListeners().map(publicListener),
+  projects: store.listProjects()
 }));
+
+app.post("/v1/projects", { preHandler: requireOwner }, async (request, reply) => {
+  const parsed = projectSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid project", details: parsed.error.flatten() });
+  const timestamp = new Date().toISOString();
+  const project: Project = { id: randomUUID(), ...parsed.data, createdAt: timestamp, updatedAt: timestamp };
+  await store.addProject(project);
+  return reply.code(201).send(project);
+});
+
+app.patch("/v1/projects/:id", { preHandler: requireOwner }, async (request, reply) => {
+  const id = (request.params as { id: string }).id;
+  if (!store.findProject(id)) return reply.code(404).send({ error: "Project not found" });
+  const parsed = projectUpdateSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid project update", details: parsed.error.flatten() });
+  return store.updateProject(id, parsed.data);
+});
+
+app.delete("/v1/projects/:id", { preHandler: requireOwner }, async (request, reply) => {
+  const removed = await store.removeProject((request.params as { id: string }).id);
+  return removed ? reply.code(204).send() : reply.code(404).send({ error: "Project not found" });
+});
 
 app.post("/v1/actions", { preHandler: requireAuth }, async (request, reply) => {
   const parsed = actionSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid action", details: parsed.error.flatten() });
+  if (parsed.data.projectId !== undefined && !(await isOwner(request.headers.authorization, config))) {
+    return reply.code(403).send({ error: "Only the owner can assign projects" });
+  }
+  if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
   const timestamp = new Date().toISOString();
-  const action = { id: randomUUID(), kind: "action" as const, ...parsed.data, createdAt: timestamp, updatedAt: timestamp };
+  const action: ActionEvent = {
+    id: randomUUID(),
+    kind: "action",
+    ...parsed.data,
+    projectId: parsed.data.projectId ?? null,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
   await store.addAction(action);
   return reply.code(201).send(action);
 });
@@ -103,12 +160,17 @@ app.patch("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply)
   if (!store.findAction(id)) return reply.code(404).send({ error: "Action not found" });
   const parsed = actionUpdateSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid action update", details: parsed.error.flatten() });
-  const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body">> = {};
+  if (parsed.data.projectId !== undefined && !(await isOwner(request.headers.authorization, config))) {
+    return reply.code(403).send({ error: "Only the owner can assign projects" });
+  }
+  if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
+  const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId">> = {};
   if (parsed.data.name !== undefined) update.name = parsed.data.name;
   if (parsed.data.method !== undefined) update.method = parsed.data.method;
   if (parsed.data.url !== undefined) update.url = parsed.data.url;
   if (parsed.data.headers !== undefined) update.headers = parsed.data.headers;
   if (parsed.data.body !== undefined) update.body = parsed.data.body;
+  if (parsed.data.projectId !== undefined) update.projectId = parsed.data.projectId;
   return store.updateAction(id, update);
 });
 
@@ -120,12 +182,17 @@ app.delete("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply
 const createListener = async (request: FastifyRequest, reply: FastifyReply) => {
   const parsed = listenerSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid listener", details: parsed.error.flatten() });
+  if (parsed.data.projectId !== undefined && !(await isOwner(request.headers.authorization, config))) {
+    return reply.code(403).send({ error: "Only the owner can assign projects" });
+  }
+  if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
   const timestamp = new Date().toISOString();
   const event: Listener = {
     id: randomUUID(),
     kind: "listener",
     name: parsed.data.name,
     secret: randomBytes(32).toString("base64url"),
+    projectId: parsed.data.projectId ?? null,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -141,6 +208,10 @@ const updateListener = async (request: FastifyRequest, reply: FastifyReply) => {
   if (!store.findListener(id)) return reply.code(404).send({ error: "Listener not found" });
   const parsed = listenerSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid listener update", details: parsed.error.flatten() });
+  if (parsed.data.projectId !== undefined && !(await isOwner(request.headers.authorization, config))) {
+    return reply.code(403).send({ error: "Only the owner can assign projects" });
+  }
+  if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
   return store.updateListener(id, parsed.data);
 };
 

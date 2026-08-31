@@ -9,6 +9,7 @@ final class AppModel {
     private(set) var isAuthenticated = false
     private(set) var actions: [ActionEvent] = []
     private(set) var listeners: [Listener] = []
+    private(set) var projects: [Project] = []
     private(set) var isLoading = false
     private(set) var runningActionID: String?
     var errorMessage: String?
@@ -58,6 +59,7 @@ final class AppModel {
         client = nil
         actions = []
         listeners = []
+        projects = []
         isAuthenticated = false
     }
 
@@ -69,6 +71,7 @@ final class AppModel {
             let response = try await client.events()
             actions = response.actions
             listeners = response.listeners
+            projects = response.projects
             errorMessage = nil
         } catch APIError.unauthorized {
             logout()
@@ -76,20 +79,20 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?) async -> Bool {
+    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?) async -> Bool {
         guard let client else { return false }
         do {
-            let event = try await client.createAction(name: name, method: method, url: url, headers: headers, body: body)
+            let event = try await client.createAction(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
             actions.append(event)
             errorMessage = nil
             return true
         } catch { errorMessage = error.localizedDescription; return false }
     }
 
-    func createListener(name: String) async -> Bool {
+    func createListener(name: String, projectId: String?) async -> Bool {
         guard let client else { return false }
         do {
-            listeners.append(try await client.createListener(name: name))
+            listeners.append(try await client.createListener(name: name, projectId: projectId))
             errorMessage = nil
             return true
         } catch { errorMessage = error.localizedDescription; return false }
@@ -101,7 +104,8 @@ final class AppModel {
         method: String,
         url: String,
         headers: [String: String],
-        body: String?
+        body: String?,
+        projectId: String?
     ) async -> Bool {
         guard let client else { return false }
         do {
@@ -111,7 +115,8 @@ final class AppModel {
                 method: method,
                 url: url,
                 headers: headers,
-                body: body
+                body: body,
+                projectId: projectId
             )
             if let index = actions.firstIndex(where: { $0.id == updated.id }) { actions[index] = updated }
             errorMessage = nil
@@ -119,14 +124,41 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription; return false }
     }
 
-    func updateListener(_ listener: Listener, name: String) async -> Bool {
+    func updateListener(_ listener: Listener, name: String, projectId: String?) async -> Bool {
         guard let client else { return false }
         do {
-            let updated = try await client.updateListener(id: listener.id, name: name)
+            let updated = try await client.updateListener(id: listener.id, name: name, projectId: projectId)
             if let index = listeners.firstIndex(where: { $0.id == updated.id }) { listeners[index] = updated }
             errorMessage = nil
             return true
         } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func createProject(name: String, color: ProjectColor) async -> Bool {
+        guard let client else { return false }
+        do {
+            projects.append(try await client.createProject(name: name, color: color))
+            errorMessage = nil
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func updateProject(_ project: Project, name: String, color: ProjectColor) async -> Bool {
+        guard let client else { return false }
+        do {
+            let updated = try await client.updateProject(id: project.id, name: name, color: color)
+            if let index = projects.firstIndex(where: { $0.id == updated.id }) { projects[index] = updated }
+            errorMessage = nil
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func deleteProject(_ project: Project) async {
+        guard let client else { return }
+        do {
+            try await client.deleteProject(id: project.id)
+            await refresh()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func run(_ action: ActionEvent) async {

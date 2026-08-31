@@ -36,11 +36,11 @@ actor APIClient {
 
     func events() async throws -> EventsResponse { try await request(path: "/v1/events") }
 
-    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?) async throws -> ActionEvent {
+    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?) async throws -> ActionEvent {
         return try await request(
             path: "/v1/actions",
             method: "POST",
-            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body)
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
         )
     }
 
@@ -50,21 +50,34 @@ actor APIClient {
         method: String,
         url: String,
         headers: [String: String],
-        body: String?
+        body: String?,
+        projectId: String?
     ) async throws -> ActionEvent {
         return try await request(
             path: "/v1/actions/\(id)",
             method: "PATCH",
-            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body)
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
         )
     }
 
-    func createListener(name: String) async throws -> Listener {
-        try await request(path: "/v1/listeners", method: "POST", body: ["name": name])
+    func createListener(name: String, projectId: String?) async throws -> Listener {
+        try await request(path: "/v1/listeners", method: "POST", body: ListenerPayload(name: name, projectId: projectId))
     }
 
-    func updateListener(id: String, name: String) async throws -> Listener {
-        try await request(path: "/v1/listeners/\(id)", method: "PATCH", body: ["name": name])
+    func updateListener(id: String, name: String, projectId: String?) async throws -> Listener {
+        try await request(path: "/v1/listeners/\(id)", method: "PATCH", body: ListenerPayload(name: name, projectId: projectId))
+    }
+
+    func createProject(name: String, color: ProjectColor) async throws -> Project {
+        try await request(path: "/v1/projects", method: "POST", body: ProjectPayload(name: name, color: color))
+    }
+
+    func updateProject(id: String, name: String, color: ProjectColor) async throws -> Project {
+        try await request(path: "/v1/projects/\(id)", method: "PATCH", body: ProjectPayload(name: name, color: color))
+    }
+
+    func deleteProject(id: String) async throws {
+        try await requestWithoutResponse(path: "/v1/projects/\(id)", method: "DELETE")
     }
 
     func runAction(id: String) async throws -> ActionRunResult {
@@ -132,8 +145,9 @@ private nonisolated struct ActionPayload: Encodable {
     let url: String
     let headers: [String: String]
     let body: String?
+    let projectId: String?
 
-    enum CodingKeys: String, CodingKey { case name, method, url, headers, body }
+    enum CodingKeys: String, CodingKey { case name, method, url, headers, body, projectId }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -143,7 +157,28 @@ private nonisolated struct ActionPayload: Encodable {
         try container.encode(headers, forKey: .headers)
         if let body { try container.encode(body, forKey: .body) }
         else { try container.encodeNil(forKey: .body) }
+        if let projectId { try container.encode(projectId, forKey: .projectId) }
+        else { try container.encodeNil(forKey: .projectId) }
     }
+}
+
+private nonisolated struct ListenerPayload: Encodable {
+    let name: String
+    let projectId: String?
+
+    enum CodingKeys: String, CodingKey { case name, projectId }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        if let projectId { try container.encode(projectId, forKey: .projectId) }
+        else { try container.encodeNil(forKey: .projectId) }
+    }
+}
+
+private nonisolated struct ProjectPayload: Encodable {
+    let name: String
+    let color: ProjectColor
 }
 
 private nonisolated struct AnyEncodable: Encodable {

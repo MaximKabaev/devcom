@@ -34,3 +34,12 @@ export async function isAuthorized(header: string | undefined, config: Config): 
   }
 }
 
+export async function isOwner(header: string | undefined, config: Config): Promise<boolean> {
+  if (!header?.startsWith("Bearer ")) return false;
+  try {
+    const result = await jwtVerify(header.slice(7), config.JWT_SECRET, { algorithms: ["HS256"] });
+    return result.payload.role === "owner";
+  } catch {
+    return false;
+  }
+}

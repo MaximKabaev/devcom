@@ -9,12 +9,13 @@ struct ActionEditorView: View {
     @State private var url: String
     @State private var headers: String
     @State private var requestBody: String
+    @State private var projectId: String?
     @State private var validationMessage: String?
     @State private var isSaving = false
 
     private let methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
-    init(model: AppModel, action: ActionEvent? = nil) {
+    init(model: AppModel, action: ActionEvent? = nil, initialProjectId: String? = nil) {
         self.model = model
         self.action = action
         _name = State(initialValue: action?.name ?? "")
@@ -22,6 +23,7 @@ struct ActionEditorView: View {
         _url = State(initialValue: action?.url ?? "")
         _headers = State(initialValue: Self.formattedHeaders(action?.headers))
         _requestBody = State(initialValue: action?.body ?? "")
+        _projectId = State(initialValue: action?.projectId ?? initialProjectId)
     }
 
     var body: some View {
@@ -35,6 +37,18 @@ struct ActionEditorView: View {
                     TextField("Endpoint", text: $url, prompt: Text("https://service.example.com/restart"))
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
+                }
+
+
+                Section("Project") {
+                    Picker("Group", selection: $projectId) {
+                        Text("No project").tag(nil as String?)
+                        ForEach(model.projects) { project in
+                            Label(project.name, systemImage: "circle.fill")
+                                .foregroundStyle(project.color.tint)
+                                .tag(Optional(project.id))
+                        }
+                    }
                 }
 
                 Section {
@@ -98,7 +112,8 @@ struct ActionEditorView: View {
                     method: method,
                     url: url,
                     headers: object,
-                    body: savedBody
+                    body: savedBody,
+                    projectId: projectId
                 )
             } else {
                 saved = await model.createAction(
@@ -106,7 +121,8 @@ struct ActionEditorView: View {
                     method: method,
                     url: url,
                     headers: object,
-                    body: savedBody
+                    body: savedBody,
+                    projectId: projectId
                 )
             }
             isSaving = false
@@ -127,12 +143,14 @@ struct ListenerEditorView: View {
     let listener: Listener?
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    @State private var projectId: String?
     @State private var isSaving = false
 
-    init(model: AppModel, listener: Listener? = nil) {
+    init(model: AppModel, listener: Listener? = nil, initialProjectId: String? = nil) {
         self.model = model
         self.listener = listener
         _name = State(initialValue: listener?.name ?? "")
+        _projectId = State(initialValue: listener?.projectId ?? initialProjectId)
     }
 
     var body: some View {
@@ -142,6 +160,18 @@ struct ListenerEditorView: View {
                     TextField("Name", text: $name, prompt: Text("Deploy finished"))
                 } footer: {
                     Text(listener == nil ? "After saving, copy the secret URL and POST a title and message to it." : "Renaming a listener does not change its secret webhook URL.")
+                }
+
+
+                Section("Project") {
+                    Picker("Group", selection: $projectId) {
+                        Text("No project").tag(nil as String?)
+                        ForEach(model.projects) { project in
+                            Label(project.name, systemImage: "circle.fill")
+                                .foregroundStyle(project.color.tint)
+                                .tag(Optional(project.id))
+                        }
+                    }
                 }
 
                 if let listener {
@@ -174,9 +204,9 @@ struct ListenerEditorView: View {
                             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                             let saved: Bool
                             if let listener {
-                                saved = await model.updateListener(listener, name: cleanName)
+                                saved = await model.updateListener(listener, name: cleanName, projectId: projectId)
                             } else {
-                                saved = await model.createListener(name: cleanName)
+                                saved = await model.createListener(name: cleanName, projectId: projectId)
                             }
                             isSaving = false
                             if saved { dismiss() }
