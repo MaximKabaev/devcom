@@ -217,7 +217,8 @@ const updateListener = async (request: FastifyRequest, reply: FastifyReply) => {
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
   const update: Pick<Listener, "name"> & Partial<Pick<Listener, "projectId">> = { name: parsed.data.name };
   if (parsed.data.projectId !== undefined) update.projectId = parsed.data.projectId;
-  return store.updateListener(id, update);
+  const updated = await store.updateListener(id, update);
+  return updated ? publicListener(updated) : reply.code(404).send({ error: "Listener not found" });
 };
 
 app.patch("/v1/listeners/:id", { preHandler: requireAuth }, updateListener);

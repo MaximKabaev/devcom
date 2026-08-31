@@ -41,14 +41,7 @@ struct ActionEditorView: View {
 
 
                 Section("Project") {
-                    Picker("Group", selection: $projectId) {
-                        Text("No project").tag(nil as String?)
-                        ForEach(model.projects) { project in
-                            Label(project.name, systemImage: "circle.fill")
-                                .foregroundStyle(project.color.tint)
-                                .tag(Optional(project.id))
-                        }
-                    }
+                    ProjectPickerRow(projects: model.projects, selection: $projectId)
                 }
 
                 Section {
@@ -164,14 +157,7 @@ struct ListenerEditorView: View {
 
 
                 Section("Project") {
-                    Picker("Group", selection: $projectId) {
-                        Text("No project").tag(nil as String?)
-                        ForEach(model.projects) { project in
-                            Label(project.name, systemImage: "circle.fill")
-                                .foregroundStyle(project.color.tint)
-                                .tag(Optional(project.id))
-                        }
-                    }
+                    ProjectPickerRow(projects: model.projects, selection: $projectId)
                 }
 
                 if let listener {
@@ -215,6 +201,50 @@ struct ListenerEditorView: View {
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 }
             }
+        }
+    }
+}
+
+private struct ProjectPickerRow: View {
+    let projects: [Project]
+    @Binding var selection: String?
+
+    private var selectedProject: Project? {
+        guard let selection else { return nil }
+        return projects.first { $0.id == selection }
+    }
+
+    var body: some View {
+        HStack {
+            Text("Group")
+            Spacer()
+            Menu {
+                Button { selection = nil } label: {
+                    Label("No project", systemImage: selection == nil ? "checkmark" : "minus")
+                }
+                ForEach(projects) { project in
+                    Button { selection = project.id } label: {
+                        Label(project.name, systemImage: selection == project.id ? "checkmark.circle.fill" : "circle.fill")
+                    }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    if let selectedProject {
+                        Circle()
+                            .fill(selectedProject.color.tint)
+                            .frame(width: 9, height: 9)
+                        Text(selectedProject.name)
+                            .foregroundStyle(DevcomTheme.ink)
+                    } else {
+                        Text("No project")
+                            .foregroundStyle(DevcomTheme.muted)
+                    }
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DevcomTheme.muted)
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 }
