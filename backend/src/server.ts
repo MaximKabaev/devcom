@@ -115,7 +115,10 @@ app.patch("/v1/projects/:id", { preHandler: requireOwner }, async (request, repl
   if (!store.findProject(id)) return reply.code(404).send({ error: "Project not found" });
   const parsed = projectUpdateSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid project update", details: parsed.error.flatten() });
-  return store.updateProject(id, parsed.data);
+  const update: Partial<Pick<Project, "name" | "color">> = {};
+  if (parsed.data.name !== undefined) update.name = parsed.data.name;
+  if (parsed.data.color !== undefined) update.color = parsed.data.color;
+  return store.updateProject(id, update);
 });
 
 app.delete("/v1/projects/:id", { preHandler: requireOwner }, async (request, reply) => {
@@ -212,7 +215,9 @@ const updateListener = async (request: FastifyRequest, reply: FastifyReply) => {
     return reply.code(403).send({ error: "Only the owner can assign projects" });
   }
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
-  return store.updateListener(id, parsed.data);
+  const update: Pick<Listener, "name"> & Partial<Pick<Listener, "projectId">> = { name: parsed.data.name };
+  if (parsed.data.projectId !== undefined) update.projectId = parsed.data.projectId;
+  return store.updateListener(id, update);
 };
 
 app.patch("/v1/listeners/:id", { preHandler: requireAuth }, updateListener);
