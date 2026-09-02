@@ -10,6 +10,7 @@ final class AppModel {
     private(set) var actions: [ActionEvent] = []
     private(set) var listeners: [Listener] = []
     private(set) var projects: [Project] = []
+    private(set) var isRestoringSession = true
     private(set) var isLoading = false
     private(set) var runningActionID: String?
     var errorMessage: String?
@@ -21,10 +22,12 @@ final class AppModel {
     func restoreSession() async {
         guard !didRestore else { return }
         didRestore = true
+        defer { isRestoringSession = false }
         guard let stored = KeychainStore.load(), let url = Self.normalizedServerURL(stored.serverURL) else { return }
         client = APIClient(baseURL: url, token: stored.token)
         isAuthenticated = true
         await refresh()
+        isRestoringSession = false
         await requestNotificationsAndRegister()
     }
 
@@ -79,10 +82,10 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?) async -> Bool {
+    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?, schedule: ActionSchedulePayload?) async -> Bool {
         guard let client else { return false }
         do {
-            let event = try await client.createAction(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
+            let event = try await client.createAction(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId, schedule: schedule)
             actions.append(event)
             errorMessage = nil
             return true
@@ -105,7 +108,8 @@ final class AppModel {
         url: String,
         headers: [String: String],
         body: String?,
-        projectId: String?
+        projectId: String?,
+        schedule: ActionSchedulePayload?
     ) async -> Bool {
         guard let client else { return false }
         do {
@@ -116,7 +120,8 @@ final class AppModel {
                 url: url,
                 headers: headers,
                 body: body,
-                projectId: projectId
+                projectId: projectId,
+                schedule: schedule
             )
             if let index = actions.firstIndex(where: { $0.id == updated.id }) { actions[index] = updated }
             errorMessage = nil

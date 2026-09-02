@@ -3,6 +3,22 @@ export type HTTPMethod = (typeof httpMethods)[number];
 export const projectColors = ["blue", "violet", "mint", "amber", "rose", "slate"] as const;
 export type ProjectColor = (typeof projectColors)[number];
 
+export type ScheduleFrequency = "once" | "weekly";
+export type ScheduleRunStatus = "succeeded" | "failed";
+
+export interface ActionSchedule {
+  frequency: ScheduleFrequency;
+  enabled: boolean;
+  runAt: string | null;
+  weekdays: number[];
+  timeOfDay: string | null;
+  timeZone: string;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: ScheduleRunStatus | null;
+  lastError: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -20,6 +36,7 @@ export interface ActionEvent {
   headers: Record<string, string>;
   body: string | null;
   projectId: string | null;
+  schedule: ActionSchedule | null;
   createdAt: string;
   updatedAt: string;
 }

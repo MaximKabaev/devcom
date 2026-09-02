@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ActionEvent, Device, Listener, Project, StoredData } from "./types.js";
+import { nextWeeklyRun } from "./schedule.js";
+import type { ActionEvent, ActionSchedule, Device, Listener, Project, ScheduleRunStatus, StoredData } from "./types.js";
 
 const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], projects: [], devices: [] });
 
@@ -26,7 +27,14 @@ export class Store {
       const legacyListeners = decoded.listens ?? [];
       this.data = {
         version: 1,
-        actions: (decoded.actions ?? []).map((item) => ({ ...item, projectId: item.projectId ?? null })),
+        actions: (decoded.actions ?? []).map((item) => {
+          const schedule = item.schedule ?? null;
+          // A null status with lastRunAt means the process stopped after claiming the run but before recording its result.
+          const recoveredSchedule = schedule?.lastRunAt && schedule.lastRunStatus === null
+            ? { ...schedule, enabled: true, nextRunAt: schedule.lastRunAt }
+            : schedule;
+          return { ...item, projectId: item.projectId ?? null, schedule: recoveredSchedule };
+        }),
         listeners: (decoded.listeners ?? legacyListeners).map((item) => ({ ...item, kind: "listener", projectId: item.projectId ?? null })),
         projects: decoded.projects ?? [],
         devices: decoded.devices ?? []
@@ -62,7 +70,7 @@ export class Store {
 
   async updateAction(
     id: string,
-    update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId">>
+    update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId" | "schedule">>
   ): Promise<ActionEvent | undefined> {
     const index = this.data.actions.findIndex((item) => item.id === id);
     const current = this.data.actions[index];
@@ -104,6 +112,41 @@ export class Store {
     this.data.actions = this.data.actions.filter((item) => item.id !== id);
     if (this.data.actions.length !== before) await this.persist();
     return this.data.actions.length !== before;
+  }
+
+  async claimDueActions(now: Date): Promise<ActionEvent[]> {
+    const due: ActionEvent[] = [];
+    const timestamp = now.toISOString();
+    this.data.actions = this.data.actions.map((action) => {
+      const schedule = action.schedule;
+      if (!schedule?.enabled || !schedule.nextRunAt || schedule.nextRunAt > timestamp) return action;
+      due.push(structuredClone(action));
+      const scheduledFor = schedule.nextRunAt;
+      const updatedSchedule: ActionSchedule = schedule.frequency === "once"
+        ? { ...schedule, enabled: false, nextRunAt: null, lastRunAt: scheduledFor, lastRunStatus: null, lastError: null }
+        : {
+            ...schedule,
+            nextRunAt: nextWeeklyRun(schedule.weekdays, schedule.timeOfDay!, schedule.timeZone, now),
+            lastRunAt: scheduledFor,
+            lastRunStatus: null,
+            lastError: null
+          };
+      return { ...action, schedule: updatedSchedule, updatedAt: timestamp };
+    });
+    if (due.length > 0) await this.persist();
+    return due;
+  }
+
+  async recordScheduledRun(id: string, runAt: string, status: ScheduleRunStatus, error: string | null): Promise<void> {
+    const index = this.data.actions.findIndex((item) => item.id === id);
+    const action = this.data.actions[index];
+    if (!action?.schedule || action.schedule.lastRunAt !== runAt) return;
+    this.data.actions[index] = {
+      ...action,
+      schedule: { ...action.schedule, lastRunStatus: status, lastError: error },
+      updatedAt: new Date().toISOString()
+    };
+    await this.persist();
   }
 
   async removeListener(id: string): Promise<boolean> {

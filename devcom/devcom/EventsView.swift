@@ -214,6 +214,9 @@ private struct ActionRow: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(DevcomTheme.muted)
                             .lineLimit(1)
+                        if let schedule = action.schedule {
+                            ActionScheduleLabel(schedule: schedule)
+                        }
                         if let project { ProjectTag(project: project) }
                     }
                     Spacer(minLength: 6)
@@ -238,6 +241,38 @@ private struct ActionRow: View {
         }
         .padding(.vertical, 7)
     }
+}
+
+private struct ActionScheduleLabel: View {
+    let schedule: ActionSchedule
+
+    var body: some View {
+        Label(text, systemImage: schedule.enabled ? "clock" : "checkmark.circle")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(DevcomTheme.muted)
+            .lineLimit(1)
+    }
+
+    private var text: String {
+        if schedule.enabled, schedule.frequency == .weekly, let time = schedule.timeOfDay {
+            let days = schedule.weekdays.compactMap { Self.weekdays.indices.contains($0) ? Self.weekdays[$0] : nil }.joined(separator: ", ")
+            return "Weekly \(days) · \(time) \(schedule.timeZone)"
+        }
+        if let nextRunAt = schedule.nextRunAt, let date = Self.date(from: nextRunAt) {
+            return "Scheduled \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+        if schedule.lastRunStatus == "succeeded" { return "Scheduled run completed" }
+        if schedule.lastRunStatus == "failed" { return "Scheduled run failed" }
+        return "Schedule paused"
+    }
+
+    private static func date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
+    private static let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 }
 
 private struct ListenerRow: View {

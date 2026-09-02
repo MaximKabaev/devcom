@@ -28,6 +28,31 @@ export const openApiDocument = {
         required: ["error"],
         properties: { error: { type: "string" } }
       },
+      OneTimeScheduleInput: {
+        type: "object",
+        required: ["frequency", "runAt", "timeZone"],
+        properties: {
+          frequency: { type: "string", const: "once" },
+          enabled: { type: "boolean", default: true },
+          runAt: { type: "string", format: "date-time", description: "A future timestamp with a UTC offset." },
+          timeZone: { type: "string", description: "A valid IANA time zone, retained for display." }
+        }
+      },
+      WeeklyScheduleInput: {
+        type: "object",
+        required: ["frequency", "weekdays", "timeOfDay", "timeZone"],
+        properties: {
+          frequency: { type: "string", const: "weekly" },
+          enabled: { type: "boolean", default: true },
+          weekdays: { type: "array", minItems: 1, maxItems: 7, uniqueItems: true, items: { type: "integer", minimum: 0, maximum: 6 }, description: "Sunday is 0; Saturday is 6." },
+          timeOfDay: { type: "string", pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$", example: "09:30" },
+          timeZone: { type: "string", description: "A valid IANA time zone, such as Europe/Moscow." }
+        }
+      },
+      ActionScheduleInput: {
+        oneOf: [{ $ref: "#/components/schemas/OneTimeScheduleInput" }, { $ref: "#/components/schemas/WeeklyScheduleInput" }],
+        discriminator: { propertyName: "frequency" }
+      },
       ActionInput: {
         type: "object",
         required: ["name", "method", "url"],
@@ -36,7 +61,9 @@ export const openApiDocument = {
           method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
           url: { type: "string", format: "uri", pattern: "^https?://" },
           headers: { type: "object", additionalProperties: { type: "string" }, default: {} },
-          body: { type: ["string", "null"], maxLength: 200000, default: null }
+          body: { type: ["string", "null"], maxLength: 200000, default: null },
+          projectId: { type: ["string", "null"], format: "uuid" },
+          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { type: "null" }], default: null }
         }
       },
       ActionUpdate: {
@@ -47,7 +74,9 @@ export const openApiDocument = {
           method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
           url: { type: "string", format: "uri", pattern: "^https?://" },
           headers: { type: "object", additionalProperties: { type: "string" } },
-          body: { type: ["string", "null"], maxLength: 200000 }
+          body: { type: ["string", "null"], maxLength: 200000 },
+          projectId: { type: ["string", "null"], format: "uuid" },
+          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { type: "null" }], description: "Replace the schedule, or send null to remove it." }
         }
       },
       ListenerInput: {
@@ -125,7 +154,7 @@ export const openApiDocument = {
       patch: {
         tags: ["Actions"],
         summary: "Update an action",
-        description: "Send one or more action fields. Omitted fields retain their current values; body can be null.",
+        description: "Send one or more action fields. Omitted fields retain their current values; body and schedule can be null.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ActionUpdate" } } } },
@@ -293,7 +322,7 @@ Content-Type: application/json</pre>
           <tr><td class="method">DELETE</td><td><code>/v1/devices/:token</code></td><td>Bearer</td><td>Remove APNs device</td></tr>
         </tbody></table>
       </section>
-      <section id="actions"><h2>Actions</h2><p>An action stores an HTTP request. Running it makes the request from the VPS.</p>
+      <section id="actions"><h2>Actions</h2><p>An action stores an HTTP request. It can be run immediately or scheduled on the backend. Agents can create, replace, pause, or remove schedules through the same create and edit endpoints used by the app.</p>
         <h3>Create</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/actions \\
   -H "Authorization: Bearer $AGENT_API_TOKEN" \\
   -H "Content-Type: application/json" \\
@@ -310,6 +339,31 @@ Content-Type: application/json</pre>
   -H "Authorization: Bearer $AGENT_API_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"url":"https://api.example.com/new-endpoint"}'</pre>
+        <h3>Schedule once</h3><pre>PATCH /v1/actions/ACTION_ID
+Authorization: Bearer YOUR_AGENT_API_TOKEN
+Content-Type: application/json
+
+{
+  "schedule": {
+    "frequency": "once",
+    "runAt": "2099-09-10T18:30:00+03:00",
+    "timeZone": "Europe/Moscow"
+  }
+}</pre>
+        <h3>Schedule weekly</h3><pre>PATCH /v1/actions/ACTION_ID
+Authorization: Bearer YOUR_AGENT_API_TOKEN
+Content-Type: application/json
+
+{
+  "schedule": {
+    "frequency": "weekly",
+    "weekdays": [1, 3, 5],
+    "timeOfDay": "09:30",
+    "timeZone": "Europe/Moscow"
+  }
+}</pre>
+        <p>Weekdays use <code>0</code> for Sunday through <code>6</code> for Saturday. Weekly wall-clock times use the supplied IANA time zone. Set <code>enabled</code> to <code>false</code> to store a paused schedule, send <code>{"schedule":null}</code> to remove one, or send a new schedule object to replace it.</p>
+        <p>The action returned by create, edit, and <code>GET /v1/events</code> includes computed <code>nextRunAt</code>, plus <code>lastRunAt</code>, <code>lastRunStatus</code>, and <code>lastError</code>. The scheduler checks for due work every 15 seconds. A due run is claimed in persistent storage before its HTTP call; after a backend restart, an overdue or interrupted occurrence is picked up by the next scheduler check. A crash after the target accepted a request but before Devcom recorded its result can cause that interrupted request to be attempted again.</p>
         <p>Run responses include <code>ok</code>, upstream <code>status</code>, <code>durationMs</code>, <code>response</code>, and <code>truncated</code>. Redirects are returned without being followed.</p>
       </section>
       <section id="listeners"><h2>Listeners</h2><p>Create a listener once, then give its returned <code>webhookURL</code> to the source service.</p>

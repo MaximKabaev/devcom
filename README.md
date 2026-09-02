@@ -2,7 +2,7 @@
 
 Devcom is a private development companion with two event types:
 
-- **Actions** call a saved HTTP endpoint from the VPS when you tap Run in the iOS app.
+- **Actions** call a saved HTTP endpoint from the VPS when you tap Run in the iOS app, at a chosen one-time date, or on a weekly schedule.
 - **Listeners** expose a secret webhook URL. A POST to that URL becomes an Apple push notification whose title and message come from the request.
 
 The repository contains a SwiftUI iOS app in `devcom/` and a TypeScript/Fastify backend in `backend/`.
@@ -78,6 +78,33 @@ POST /v1/actions
 ```
 
 The returned `id` can be invoked with `POST /v1/actions/{id}/run`.
+
+Agents can add or replace a one-time schedule while creating or editing an action:
+
+```json
+{
+  "schedule": {
+    "frequency": "once",
+    "runAt": "2099-09-10T18:30:00+03:00",
+    "timeZone": "Europe/Moscow"
+  }
+}
+```
+
+For a recurring weekly action, use weekday numbers `0` (Sunday) through `6` (Saturday), a 24-hour wall-clock time, and an IANA time zone:
+
+```json
+{
+  "schedule": {
+    "frequency": "weekly",
+    "weekdays": [1, 3, 5],
+    "timeOfDay": "09:30",
+    "timeZone": "Europe/Moscow"
+  }
+}
+```
+
+Send either object as `schedule` in `POST /v1/actions` or `PATCH /v1/actions/{id}`. Send `{"schedule": null}` to remove a schedule, or include `"enabled": false` to store it paused. Action responses expose `nextRunAt`, `lastRunAt`, `lastRunStatus`, and `lastError` inside `schedule`. The backend persists scheduling state and checks due work every 15 seconds; overdue or interrupted work is picked up after a backend restart. If the backend stops after the target accepts a request but before the result is recorded, that interrupted request can be attempted again; scheduled targets should therefore support idempotent requests when duplicates matter.
 
 Create a listener:
 

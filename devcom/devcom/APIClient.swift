@@ -36,11 +36,11 @@ actor APIClient {
 
     func events() async throws -> EventsResponse { try await request(path: "/v1/events") }
 
-    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?) async throws -> ActionEvent {
+    func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?, schedule: ActionSchedulePayload?) async throws -> ActionEvent {
         return try await request(
             path: "/v1/actions",
             method: "POST",
-            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId, schedule: schedule)
         )
     }
 
@@ -51,12 +51,13 @@ actor APIClient {
         url: String,
         headers: [String: String],
         body: String?,
-        projectId: String?
+        projectId: String?,
+        schedule: ActionSchedulePayload?
     ) async throws -> ActionEvent {
         return try await request(
             path: "/v1/actions/\(id)",
             method: "PATCH",
-            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId)
+            body: ActionPayload(name: name, method: method, url: url, headers: headers, body: body, projectId: projectId, schedule: schedule)
         )
     }
 
@@ -146,8 +147,9 @@ private nonisolated struct ActionPayload: Encodable {
     let headers: [String: String]
     let body: String?
     let projectId: String?
+    let schedule: ActionSchedulePayload?
 
-    enum CodingKeys: String, CodingKey { case name, method, url, headers, body, projectId }
+    enum CodingKeys: String, CodingKey { case name, method, url, headers, body, projectId, schedule }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -159,6 +161,8 @@ private nonisolated struct ActionPayload: Encodable {
         else { try container.encodeNil(forKey: .body) }
         if let projectId { try container.encode(projectId, forKey: .projectId) }
         else { try container.encodeNil(forKey: .projectId) }
+        if let schedule { try container.encode(schedule, forKey: .schedule) }
+        else { try container.encodeNil(forKey: .schedule) }
     }
 }
 

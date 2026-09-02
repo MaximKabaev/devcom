@@ -10,6 +10,8 @@ import { APNSClient } from "./apns.js";
 import { createSession, isAuthorized, isOwner, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { docsHTML, openApiDocument } from "./docs.js";
+import { createSchedule, isValidTimeZone } from "./schedule.js";
+import { startScheduler } from "./scheduler.js";
 import { Store } from "./store.js";
 import { httpMethods, projectColors, type ActionEvent, type Listener, type Project } from "./types.js";
 
@@ -58,13 +60,31 @@ function publicListener(event: Listener) {
 }
 
 const credentialsSchema = z.object({ username: z.string().min(1), password: z.string().min(1).max(256) });
+const timeZoneSchema = z.string().min(1).max(100).refine(isValidTimeZone, "Use a valid IANA time zone");
+const scheduleSchema = z.discriminatedUnion("frequency", [
+  z.object({
+    frequency: z.literal("once"),
+    enabled: z.boolean().default(true),
+    runAt: z.iso.datetime({ offset: true }),
+    timeZone: timeZoneSchema
+  }),
+  z.object({
+    frequency: z.literal("weekly"),
+    enabled: z.boolean().default(true),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7)
+      .refine((days) => new Set(days).size === days.length, "Weekdays must be unique"),
+    timeOfDay: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    timeZone: timeZoneSchema
+  })
+]);
 const actionSchema = z.object({
   name: z.string().trim().min(1).max(80),
   method: z.enum(httpMethods),
   url: z.string().url().refine((url) => url.startsWith("http://") || url.startsWith("https://"), "Only HTTP(S) URLs are supported"),
   headers: z.record(z.string(), z.string().max(8_192)).default({}),
   body: z.string().max(200_000).nullable().default(null),
-  projectId: z.string().uuid().nullable().optional()
+  projectId: z.string().uuid().nullable().optional(),
+  schedule: scheduleSchema.nullable().default(null)
 });
 const actionUpdateSchema = actionSchema.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
 const listenerSchema = z.object({
@@ -133,12 +153,17 @@ app.post("/v1/actions", { preHandler: requireAuth }, async (request, reply) => {
     return reply.code(403).send({ error: "Only the owner can assign projects" });
   }
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
+  if (parsed.data.schedule?.frequency === "once" && parsed.data.schedule.enabled && new Date(parsed.data.schedule.runAt) <= new Date()) {
+    return reply.code(400).send({ error: "A one-time schedule must be in the future" });
+  }
   const timestamp = new Date().toISOString();
+  const schedule = parsed.data.schedule ? createSchedule(parsed.data.schedule) : null;
   const action: ActionEvent = {
     id: randomUUID(),
     kind: "action",
     ...parsed.data,
     projectId: parsed.data.projectId ?? null,
+    schedule,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -167,13 +192,17 @@ app.patch("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply)
     return reply.code(403).send({ error: "Only the owner can assign projects" });
   }
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
-  const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId">> = {};
+  if (parsed.data.schedule?.frequency === "once" && parsed.data.schedule.enabled && new Date(parsed.data.schedule.runAt) <= new Date()) {
+    return reply.code(400).send({ error: "A one-time schedule must be in the future" });
+  }
+  const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId" | "schedule">> = {};
   if (parsed.data.name !== undefined) update.name = parsed.data.name;
   if (parsed.data.method !== undefined) update.method = parsed.data.method;
   if (parsed.data.url !== undefined) update.url = parsed.data.url;
   if (parsed.data.headers !== undefined) update.headers = parsed.data.headers;
   if (parsed.data.body !== undefined) update.body = parsed.data.body;
   if (parsed.data.projectId !== undefined) update.projectId = parsed.data.projectId;
+  if (parsed.data.schedule !== undefined) update.schedule = parsed.data.schedule ? createSchedule(parsed.data.schedule) : null;
   return store.updateAction(id, update);
 });
 
@@ -304,4 +333,6 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
 });
 
 await store.load();
+const stopScheduler = startScheduler(store, app.log);
+app.addHook("onClose", async () => stopScheduler());
 await app.listen({ host: config.HOST, port: config.PORT });

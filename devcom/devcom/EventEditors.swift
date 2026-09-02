@@ -10,6 +10,12 @@ struct ActionEditorView: View {
     @State private var headers: String
     @State private var requestBody: String
     @State private var projectId: String?
+    @State private var scheduleEnabled: Bool
+    @State private var scheduleFrequency: ScheduleFrequency
+    @State private var scheduledDate: Date
+    @State private var scheduledWeekdays: Set<Int>
+    @State private var scheduledTime: Date
+    @State private var scheduleTimeZone: String
     @State private var validationMessage: String?
     @State private var isSaving = false
 
@@ -24,6 +30,13 @@ struct ActionEditorView: View {
         _headers = State(initialValue: Self.formattedHeaders(action?.headers))
         _requestBody = State(initialValue: action?.body ?? "")
         _projectId = State(initialValue: action?.projectId ?? initialProjectId)
+        let schedule = action?.schedule
+        _scheduleEnabled = State(initialValue: schedule?.enabled ?? false)
+        _scheduleFrequency = State(initialValue: schedule?.frequency ?? .once)
+        _scheduledDate = State(initialValue: Self.date(from: schedule?.runAt) ?? Date().addingTimeInterval(3600))
+        _scheduledWeekdays = State(initialValue: Set(schedule?.weekdays ?? [Calendar.current.component(.weekday, from: Date()) - 1]))
+        _scheduledTime = State(initialValue: Self.time(from: schedule?.timeOfDay))
+        _scheduleTimeZone = State(initialValue: schedule?.timeZone ?? TimeZone.current.identifier)
     }
 
     var body: some View {
@@ -64,6 +77,51 @@ struct ActionEditorView: View {
                     }
                 }
 
+                Section {
+                    Toggle("Run on a schedule", isOn: $scheduleEnabled)
+                    if scheduleEnabled {
+                        Picker("Repeats", selection: $scheduleFrequency) {
+                            Text("Once").tag(ScheduleFrequency.once)
+                            Text("Weekly").tag(ScheduleFrequency.weekly)
+                        }
+                        .pickerStyle(.segmented)
+
+                        if scheduleFrequency == .once {
+                            DatePicker("Run at", selection: $scheduledDate, displayedComponents: [.date, .hourAndMinute])
+                        } else {
+                            HStack(spacing: 5) {
+                                ForEach(Array(Self.weekdayNames.enumerated()), id: \.offset) { day, label in
+                                    Button {
+                                        if scheduledWeekdays.contains(day) { scheduledWeekdays.remove(day) }
+                                        else { scheduledWeekdays.insert(day) }
+                                    } label: {
+                                        Text(label)
+                                            .font(.caption2.weight(.bold))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 30)
+                                            .background(scheduledWeekdays.contains(day) ? DevcomTheme.outbound.opacity(0.18) : DevcomTheme.canvas, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(Self.fullWeekdayNames[day])
+                                    .accessibilityAddTraits(scheduledWeekdays.contains(day) ? .isSelected : [])
+                                }
+                            }
+                            DatePicker("Time", selection: $scheduledTime, displayedComponents: .hourAndMinute)
+                            TextField("Time zone", text: $scheduleTimeZone)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                    }
+                } header: {
+                    Text("Schedule")
+                } footer: {
+                    if scheduleEnabled && scheduleFrequency == .weekly {
+                        Text("Weekly runs use the IANA time zone shown above, including daylight-saving changes.")
+                    } else {
+                        Text("Scheduled requests are executed by the backend, even when the app is closed.")
+                    }
+                }
+
                 if let validationMessage {
                     Section { Text(validationMessage).foregroundStyle(.red) }
                 }
@@ -92,6 +150,32 @@ struct ActionEditorView: View {
             validationMessage = "Enter a complete HTTP or HTTPS endpoint."
             return
         }
+        let schedule: ActionSchedulePayload?
+        if scheduleEnabled {
+            guard TimeZone(identifier: scheduleTimeZone) != nil else {
+                validationMessage = "Enter a valid IANA time zone, such as Europe/Moscow."
+                return
+            }
+            if scheduleFrequency == .once {
+                guard scheduledDate > Date() else {
+                    validationMessage = "Choose a future date and time."
+                    return
+                }
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                schedule = .once(runAt: formatter.string(from: scheduledDate), timeZone: scheduleTimeZone)
+            } else {
+                guard !scheduledWeekdays.isEmpty else {
+                    validationMessage = "Choose at least one weekday."
+                    return
+                }
+                let components = Calendar.current.dateComponents([.hour, .minute], from: scheduledTime)
+                let time = String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+                schedule = .weekly(weekdays: scheduledWeekdays.sorted(), timeOfDay: time, timeZone: scheduleTimeZone)
+            }
+        } else {
+            schedule = nil
+        }
         validationMessage = nil
         isSaving = true
         Task {
@@ -106,7 +190,8 @@ struct ActionEditorView: View {
                     url: url,
                     headers: object,
                     body: savedBody,
-                    projectId: projectId
+                    projectId: projectId,
+                    schedule: schedule
                 )
             } else {
                 saved = await model.createAction(
@@ -115,7 +200,8 @@ struct ActionEditorView: View {
                     url: url,
                     headers: object,
                     body: savedBody,
-                    projectId: projectId
+                    projectId: projectId,
+                    schedule: schedule
                 )
             }
             isSaving = false
@@ -128,6 +214,24 @@ struct ActionEditorView: View {
         guard let data = try? JSONSerialization.data(withJSONObject: headers, options: [.prettyPrinted, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return "{}" }
         return text
+    }
+
+    private static let weekdayNames = ["S", "M", "T", "W", "T", "F", "S"]
+    private static let fullWeekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    private static func date(from value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
+    }
+
+    private static func time(from value: String?) -> Date {
+        guard let value else { return Date() }
+        let parts = value.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return Date() }
+        return Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date()) ?? Date()
     }
 }
 
