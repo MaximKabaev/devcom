@@ -10,8 +10,8 @@ struct ActionEditorView: View {
     @State private var headers: String
     @State private var requestBody: String
     @State private var projectId: String?
-    @State private var scheduleEnabled: Bool
-    @State private var scheduleFrequency: ScheduleFrequency
+    @State private var onceScheduleEnabled: Bool
+    @State private var recurringScheduleEnabled: Bool
     @State private var scheduledDate: Date
     @State private var scheduledWeekdays: Set<Int>
     @State private var scheduledTime: Date
@@ -30,13 +30,14 @@ struct ActionEditorView: View {
         _headers = State(initialValue: Self.formattedHeaders(action?.headers))
         _requestBody = State(initialValue: action?.body ?? "")
         _projectId = State(initialValue: action?.projectId ?? initialProjectId)
-        let schedule = action?.schedule
-        _scheduleEnabled = State(initialValue: schedule?.enabled ?? false)
-        _scheduleFrequency = State(initialValue: schedule?.frequency ?? .once)
-        _scheduledDate = State(initialValue: Self.date(from: schedule?.runAt) ?? Date().addingTimeInterval(3600))
-        _scheduledWeekdays = State(initialValue: Set(schedule?.weekdays ?? [Calendar.current.component(.weekday, from: Date()) - 1]))
-        _scheduledTime = State(initialValue: Self.time(from: schedule?.timeOfDay))
-        _scheduleTimeZone = State(initialValue: schedule?.timeZone ?? TimeZone.current.identifier)
+        let once = action?.schedule.once
+        let recurring = action?.schedule.recurring
+        _onceScheduleEnabled = State(initialValue: once?.enabled ?? false)
+        _recurringScheduleEnabled = State(initialValue: recurring?.enabled ?? false)
+        _scheduledDate = State(initialValue: Self.date(from: once?.runAt) ?? Date().addingTimeInterval(3600))
+        _scheduledWeekdays = State(initialValue: Set(recurring?.weekdays ?? [Calendar.current.component(.weekday, from: Date()) - 1]))
+        _scheduledTime = State(initialValue: Self.time(from: recurring?.timeOfDay))
+        _scheduleTimeZone = State(initialValue: recurring?.timeZone ?? TimeZone.current.identifier)
     }
 
     var body: some View {
@@ -78,17 +79,12 @@ struct ActionEditorView: View {
                 }
 
                 Section {
-                    Toggle("Run on a schedule", isOn: $scheduleEnabled)
-                    if scheduleEnabled {
-                        Picker("Repeats", selection: $scheduleFrequency) {
-                            Text("Once").tag(ScheduleFrequency.once)
-                            Text("Weekly").tag(ScheduleFrequency.weekly)
-                        }
-                        .pickerStyle(.segmented)
-
-                        if scheduleFrequency == .once {
-                            DatePicker("Run at", selection: $scheduledDate, displayedComponents: [.date, .hourAndMinute])
-                        } else {
+                    Toggle("Run once", isOn: $onceScheduleEnabled)
+                    if onceScheduleEnabled {
+                        DatePicker("Run at", selection: $scheduledDate, displayedComponents: [.date, .hourAndMinute])
+                    }
+                    Toggle("Run repeatedly", isOn: $recurringScheduleEnabled)
+                    if recurringScheduleEnabled {
                             HStack(spacing: 5) {
                                 ForEach(Array(Self.weekdayNames.enumerated()), id: \.offset) { day, label in
                                     Button {
@@ -115,7 +111,7 @@ struct ActionEditorView: View {
                 } header: {
                     Text("Schedule")
                 } footer: {
-                    if scheduleEnabled && scheduleFrequency == .weekly {
+                    if recurringScheduleEnabled {
                         Text("Weekly runs use the IANA time zone shown above, including daylight-saving changes.")
                     } else {
                         Text("Scheduled requests are executed by the backend, even when the app is closed.")
@@ -151,28 +147,36 @@ struct ActionEditorView: View {
             return
         }
         let schedule: ActionSchedulePayload?
-        if scheduleEnabled {
+        if onceScheduleEnabled || recurringScheduleEnabled {
             guard TimeZone(identifier: scheduleTimeZone) != nil else {
                 validationMessage = "Enter a valid IANA time zone, such as Europe/Moscow."
                 return
             }
-            if scheduleFrequency == .once {
+            let oncePayload: ScheduleItemPayload?
+            if onceScheduleEnabled {
                 guard scheduledDate > Date() else {
                     validationMessage = "Choose a future date and time."
                     return
                 }
                 let formatter = ISO8601DateFormatter()
                 formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                schedule = .once(runAt: formatter.string(from: scheduledDate), timeZone: scheduleTimeZone)
+                oncePayload = .once(runAt: formatter.string(from: scheduledDate), timeZone: scheduleTimeZone)
             } else {
+                oncePayload = nil
+            }
+            let recurringPayload: ScheduleItemPayload?
+            if recurringScheduleEnabled {
                 guard !scheduledWeekdays.isEmpty else {
                     validationMessage = "Choose at least one weekday."
                     return
                 }
                 let components = Calendar.current.dateComponents([.hour, .minute], from: scheduledTime)
                 let time = String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
-                schedule = .weekly(weekdays: scheduledWeekdays.sorted(), timeOfDay: time, timeZone: scheduleTimeZone)
+                recurringPayload = .weekly(weekdays: scheduledWeekdays.sorted(), timeOfDay: time, timeZone: scheduleTimeZone)
+            } else {
+                recurringPayload = nil
             }
+            schedule = ActionSchedulePayload(once: oncePayload, recurring: recurringPayload)
         } else {
             schedule = nil
         }

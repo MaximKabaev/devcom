@@ -36,6 +36,8 @@ actor APIClient {
 
     func events() async throws -> EventsResponse { try await request(path: "/v1/events") }
 
+    func history() async throws -> HistoryResponse { try await request(path: "/v1/history") }
+
     func createAction(name: String, method: String, url: String, headers: [String: String], body: String?, projectId: String?, schedule: ActionSchedulePayload?) async throws -> ActionEvent {
         return try await request(
             path: "/v1/actions",

@@ -10,6 +10,7 @@ final class AppModel {
     private(set) var actions: [ActionEvent] = []
     private(set) var listeners: [Listener] = []
     private(set) var projects: [Project] = []
+    private(set) var history: [HistoryEntry] = []
     private(set) var isRestoringSession = true
     private(set) var isLoading = false
     private(set) var runningActionID: String?
@@ -63,6 +64,7 @@ final class AppModel {
         actions = []
         listeners = []
         projects = []
+        history = []
         isAuthenticated = false
     }
 
@@ -75,6 +77,10 @@ final class AppModel {
             actions = response.actions
             listeners = response.listeners
             projects = response.projects
+            // History is a separate endpoint so an older backend can still
+            // populate the main event lists while the log is unavailable.
+            do { history = try await client.history().history }
+            catch { history = [] }
             errorMessage = nil
         } catch APIError.unauthorized {
             logout()

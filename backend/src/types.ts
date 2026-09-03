@@ -19,6 +19,28 @@ export interface ActionSchedule {
   lastError: string | null;
 }
 
+export interface ActionSchedules {
+  once: ActionSchedule | null;
+  recurring: ActionSchedule | null;
+}
+
+export type HistoryKind = "action" | "listener";
+export type HistorySource = "manual" | "scheduled" | "webhook";
+export type HistoryStatus = "succeeded" | "failed" | "accepted";
+
+export interface HistoryEntry {
+  id: string;
+  kind: HistoryKind;
+  eventId: string;
+  eventName: string;
+  source: HistorySource;
+  status: HistoryStatus;
+  statusCode: number | null;
+  occurredAt: string;
+  durationMs: number | null;
+  error: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -36,7 +58,7 @@ export interface ActionEvent {
   headers: Record<string, string>;
   body: string | null;
   projectId: string | null;
-  schedule: ActionSchedule | null;
+  schedule: ActionSchedules;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,4 +85,5 @@ export interface StoredData {
   listeners: Listener[];
   projects: Project[];
   devices: Device[];
+  history: HistoryEntry[];
 }

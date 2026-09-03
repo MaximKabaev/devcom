@@ -53,6 +53,14 @@ export const openApiDocument = {
         oneOf: [{ $ref: "#/components/schemas/OneTimeScheduleInput" }, { $ref: "#/components/schemas/WeeklyScheduleInput" }],
         discriminator: { propertyName: "frequency" }
       },
+      ActionSchedulesInput: {
+        type: "object",
+        properties: {
+          once: { oneOf: [{ $ref: "#/components/schemas/OneTimeScheduleInput" }, { type: "null" }] },
+          recurring: { oneOf: [{ $ref: "#/components/schemas/WeeklyScheduleInput" }, { type: "null" }] }
+        },
+        description: "One-time and recurring schedules are independent and may both be present."
+      },
       ActionInput: {
         type: "object",
         required: ["name", "method", "url"],
@@ -63,7 +71,7 @@ export const openApiDocument = {
           headers: { type: "object", additionalProperties: { type: "string" }, default: {} },
           body: { type: ["string", "null"], maxLength: 200000, default: null },
           projectId: { type: ["string", "null"], format: "uuid" },
-          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { type: "null" }], default: null }
+          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { $ref: "#/components/schemas/ActionSchedulesInput" }, { type: "null" }], default: null }
         }
       },
       ActionUpdate: {
@@ -76,7 +84,7 @@ export const openApiDocument = {
           headers: { type: "object", additionalProperties: { type: "string" } },
           body: { type: ["string", "null"], maxLength: 200000 },
           projectId: { type: ["string", "null"], format: "uuid" },
-          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { type: "null" }], description: "Replace the schedule, or send null to remove it." }
+          schedule: { oneOf: [{ $ref: "#/components/schemas/ActionScheduleInput" }, { $ref: "#/components/schemas/ActionSchedulesInput" }, { type: "null" }], description: "Set either schedule independently; omitted nested schedules remain unchanged. Null removes both." }
         }
       },
       ListenerInput: {
@@ -130,6 +138,13 @@ export const openApiDocument = {
         summary: "List actions and listeners",
         security: [{ bearerAuth: [] }],
         responses: { "200": { description: "Both event collections." }, "401": { description: "Bearer token required." } }
+      }
+    },
+    "/v1/history": {
+      get: {
+        tags: ["Events"], summary: "List action runs and listener deliveries", security: [{ bearerAuth: [] }],
+        parameters: ["kind", "eventId", "source", "status", "from", "to", "limit"].map((name) => ({ name, in: "query", required: false, schema: { type: name === "limit" ? "integer" : "string" } })),
+        responses: { "200": { description: "Newest history entries, optionally filtered by event, kind, source, status, or ISO timestamp range." } }
       }
     },
     "/v1/actions": {
@@ -309,6 +324,7 @@ Content-Type: application/json</pre>
           <tr><td class="method">GET</td><td><code>/health</code></td><td>Public</td><td>Service health</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/auth/login</code></td><td>Credentials</td><td>Create owner session</td></tr>
           <tr><td class="method">GET</td><td><code>/v1/events</code></td><td>Bearer</td><td>List actions and listeners</td></tr>
+          <tr><td class="method">GET</td><td><code>/v1/history</code></td><td>Bearer</td><td>Filter action and listener history</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions</code></td><td>Bearer</td><td>Create an action</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/actions/:id/run</code></td><td>Bearer</td><td>Run an action</td></tr>
           <tr><td class="method">PATCH</td><td><code>/v1/actions/:id</code></td><td>Bearer</td><td>Edit an action</td></tr>
@@ -344,26 +360,26 @@ Authorization: Bearer YOUR_AGENT_API_TOKEN
 Content-Type: application/json
 
 {
-  "schedule": {
+  "schedule": { "once": {
     "frequency": "once",
     "runAt": "2099-09-10T18:30:00+03:00",
     "timeZone": "Europe/Moscow"
-  }
+  } }
 }</pre>
         <h3>Schedule weekly</h3><pre>PATCH /v1/actions/ACTION_ID
 Authorization: Bearer YOUR_AGENT_API_TOKEN
 Content-Type: application/json
 
 {
-  "schedule": {
+  "schedule": { "recurring": {
     "frequency": "weekly",
     "weekdays": [1, 3, 5],
     "timeOfDay": "09:30",
     "timeZone": "Europe/Moscow"
-  }
+  } }
 }</pre>
-        <p>Weekdays use <code>0</code> for Sunday through <code>6</code> for Saturday. Weekly wall-clock times use the supplied IANA time zone. Set <code>enabled</code> to <code>false</code> to store a paused schedule, send <code>{"schedule":null}</code> to remove one, or send a new schedule object to replace it.</p>
-        <p>The action returned by create, edit, and <code>GET /v1/events</code> includes computed <code>nextRunAt</code>, plus <code>lastRunAt</code>, <code>lastRunStatus</code>, and <code>lastError</code>. The scheduler checks for due work every 15 seconds. A due run is claimed in persistent storage before its HTTP call; after a backend restart, an overdue or interrupted occurrence is picked up by the next scheduler check. A crash after the target accepted a request but before Devcom recorded its result can cause that interrupted request to be attempted again.</p>
+        <p>Weekdays use <code>0</code> for Sunday through <code>6</code> for Saturday. Weekly wall-clock times use the supplied IANA time zone. Put a one-time schedule under <code>schedule.once</code> and a weekly schedule under <code>schedule.recurring</code>; both may be present and are independent. On PATCH, omitted nested schedules remain unchanged. Set a nested value to <code>null</code> to remove only it, or send <code>{"schedule":null}</code> to remove both.</p>
+        <p>The action returned by create, edit, and <code>GET /v1/events</code> includes computed schedule state for each schedule. The scheduler checks for due work every 15 seconds. A due run is claimed in persistent storage before its HTTP call; after a backend restart, an overdue or interrupted occurrence is picked up by the next scheduler check. A crash after the target accepted a request but before Devcom recorded its result can cause that interrupted request to be attempted again.</p>
         <p>Run responses include <code>ok</code>, upstream <code>status</code>, <code>durationMs</code>, <code>response</code>, and <code>truncated</code>. Redirects are returned without being followed.</p>
       </section>
       <section id="listeners"><h2>Listeners</h2><p>Create a listener once, then give its returned <code>webhookURL</code> to the source service.</p>
@@ -379,7 +395,7 @@ Content-Type: application/json
   -H 'Content-Type: text/plain' \\
   -H 'X-Devcom-Title: Backup complete' \\
   --data '12.4 GB copied in 83 seconds'</pre>
-        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports delivery counts, registered device environments, and sanitized APNs error reasons. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
+        <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports delivery counts, registered device environments, and sanitized APNs error reasons. Each webhook delivery is recorded in <code>GET /v1/history</code>, which supports kind, event, source, status, timestamp, and limit filters. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
       </section>
       <section id="devices"><h2>Devices</h2><p>The iOS client manages this automatically. Manual registration accepts a hexadecimal APNs token and <code>sandbox</code> or <code>production</code>.</p>
         <pre>POST /v1/devices

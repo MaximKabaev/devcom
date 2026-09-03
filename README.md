@@ -79,15 +79,15 @@ POST /v1/actions
 
 The returned `id` can be invoked with `POST /v1/actions/{id}/run`.
 
-Agents can add or replace a one-time schedule while creating or editing an action:
+Agents can add or replace an independent one-time schedule while creating or editing an action:
 
 ```json
 {
-  "schedule": {
+  "schedule": { "once": {
     "frequency": "once",
     "runAt": "2099-09-10T18:30:00+03:00",
     "timeZone": "Europe/Moscow"
-  }
+  } }
 }
 ```
 
@@ -95,16 +95,18 @@ For a recurring weekly action, use weekday numbers `0` (Sunday) through `6` (Sat
 
 ```json
 {
-  "schedule": {
+  "schedule": { "recurring": {
     "frequency": "weekly",
     "weekdays": [1, 3, 5],
     "timeOfDay": "09:30",
     "timeZone": "Europe/Moscow"
-  }
+  } }
 }
 ```
 
-Send either object as `schedule` in `POST /v1/actions` or `PATCH /v1/actions/{id}`. Send `{"schedule": null}` to remove a schedule, or include `"enabled": false` to store it paused. Action responses expose `nextRunAt`, `lastRunAt`, `lastRunStatus`, and `lastError` inside `schedule`. The backend persists scheduling state and checks due work every 15 seconds; overdue or interrupted work is picked up after a backend restart. If the backend stops after the target accepts a request but before the result is recorded, that interrupted request can be attempted again; scheduled targets should therefore support idempotent requests when duplicates matter.
+Send either object as `schedule` in `POST /v1/actions` or `PATCH /v1/actions/{id}`. An action may contain both `schedule.once` and `schedule.recurring`; PATCHing one nested field leaves the other unchanged. Send `{"schedule": null}` to remove both, or set either nested value to `null` to remove only that schedule. Include `"enabled": false` to store a paused schedule. Action responses expose scheduling state inside each schedule. The backend persists scheduling state and checks due work every 15 seconds; overdue or interrupted work is picked up after a backend restart. If the backend stops after the target accepts a request but before the result is recorded, that interrupted request can be attempted again; scheduled targets should therefore support idempotent requests when duplicates matter.
+
+Action runs and listener webhook deliveries are retained in history. Agents and the app can query `GET /v1/history` with optional `kind`, `eventId`, `source`, `status`, `from`, `to`, and `limit` filters.
 
 Create a listener:
 
@@ -137,6 +139,7 @@ Alternatively, send any plain-text body and set `X-Devcom-Title`; or set both `X
 | `GET` | `/health` | None | Reverse-proxy health check |
 | `POST` | `/v1/auth/login` | Username/password body | Create an app session |
 | `GET` | `/v1/events` | Owner or agent bearer token | List both event types |
+| `GET` | `/v1/history` | Owner or agent bearer token | Filter action runs and listener deliveries |
 | `POST` | `/v1/actions` | Owner or agent bearer token | Create an action |
 | `POST` | `/v1/actions/:id/run` | Owner or agent bearer token | Run an action |
 | `PATCH` | `/v1/actions/:id` | Owner or agent bearer token | Edit an action |

@@ -17,7 +17,7 @@ nonisolated struct ActionSchedule: Codable, Sendable {
     let lastError: String?
 }
 
-nonisolated enum ActionSchedulePayload: Encodable, Sendable {
+nonisolated enum ScheduleItemPayload: Encodable, Sendable {
     case once(runAt: String, timeZone: String)
     case weekly(weekdays: [Int], timeOfDay: String, timeZone: String)
 
@@ -40,6 +40,16 @@ nonisolated enum ActionSchedulePayload: Encodable, Sendable {
     }
 }
 
+nonisolated struct ActionSchedules: Codable, Sendable {
+    let once: ActionSchedule?
+    let recurring: ActionSchedule?
+}
+
+nonisolated struct ActionSchedulePayload: Encodable, Sendable {
+    let once: ScheduleItemPayload?
+    let recurring: ScheduleItemPayload?
+}
+
 nonisolated struct ActionEvent: Codable, Identifiable, Sendable {
     let id: String
     let kind: String
@@ -49,7 +59,7 @@ nonisolated struct ActionEvent: Codable, Identifiable, Sendable {
     let headers: [String: String]
     let body: String?
     let projectId: String?
-    let schedule: ActionSchedule?
+    let schedule: ActionSchedules
     let createdAt: String
     let updatedAt: String
 }
@@ -93,6 +103,55 @@ nonisolated struct ActionRunResult: Codable, Identifiable, Sendable {
     let truncated: Bool
 
     var id: String { "\(status)-\(durationMs)-\(response)" }
+}
+
+/// A server-side record of an action execution or an inbound listener delivery.
+/// Optional fields keep the client compatible with older history records and
+/// with the two different event shapes returned by the API.
+nonisolated struct HistoryEntry: Codable, Identifiable, Sendable {
+    let id: String
+    let kind: String?
+    let eventId: String?
+    let eventName: String?
+    let actionId: String?
+    let listenerId: String?
+    let status: String?
+    let method: String?
+    let url: String?
+    let occurredAt: String?
+    let createdAt: String?
+    let durationMs: Int?
+    let response: String?
+    let error: String?
+    let projectId: String?
+
+    var displayKind: String {
+        switch (kind ?? "").lowercased() {
+        case "listener", "listen", "inbound": return "Listener"
+        default: return "Action"
+        }
+    }
+
+    var displayName: String { eventName ?? eventId ?? actionId ?? listenerId ?? "Unknown event" }
+    var timestamp: String? { occurredAt ?? createdAt }
+}
+
+nonisolated struct HistoryResponse: Decodable, Sendable {
+    let history: [HistoryEntry]
+
+    init(from decoder: Decoder) throws {
+        if let values = try? decoder.singleValueContainer().decode([HistoryEntry].self) {
+            history = values
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        history = try container.decodeIfPresent([HistoryEntry].self, forKey: .history)
+            ?? container.decodeIfPresent([HistoryEntry].self, forKey: .entries)
+            ?? container.decodeIfPresent([HistoryEntry].self, forKey: .items)
+            ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey { case history, entries, items }
 }
 
 nonisolated struct StoredSession: Codable, Sendable {

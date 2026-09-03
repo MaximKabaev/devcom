@@ -10,7 +10,7 @@ import { APNSClient } from "./apns.js";
 import { createSession, isAuthorized, isOwner, verifyPassword } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { docsHTML, openApiDocument } from "./docs.js";
-import { createSchedule, isValidTimeZone } from "./schedule.js";
+import { createSchedule, createSchedules, isValidTimeZone } from "./schedule.js";
 import { startScheduler } from "./scheduler.js";
 import { Store } from "./store.js";
 import { httpMethods, projectColors, type ActionEvent, type Listener, type Project } from "./types.js";
@@ -77,6 +77,13 @@ const scheduleSchema = z.discriminatedUnion("frequency", [
     timeZone: timeZoneSchema
   })
 ]);
+const schedulesSchema = z.object({ once: scheduleSchema.nullable().optional(), recurring: scheduleSchema.nullable().optional() })
+  .refine((value) => value.once !== undefined || value.recurring !== undefined, "At least one schedule is required")
+  .superRefine((value, context) => {
+    if (value.once && value.once.frequency !== "once") context.addIssue({ code: "custom", path: ["once"], message: "once must use frequency once" });
+    if (value.recurring && value.recurring.frequency !== "weekly") context.addIssue({ code: "custom", path: ["recurring"], message: "recurring must use frequency weekly" });
+  });
+const scheduleFieldSchema = z.union([scheduleSchema, schedulesSchema]);
 const actionSchema = z.object({
   name: z.string().trim().min(1).max(80),
   method: z.enum(httpMethods),
@@ -84,7 +91,7 @@ const actionSchema = z.object({
   headers: z.record(z.string(), z.string().max(8_192)).default({}),
   body: z.string().max(200_000).nullable().default(null),
   projectId: z.string().uuid().nullable().optional(),
-  schedule: scheduleSchema.nullable().default(null)
+  schedule: scheduleFieldSchema.nullable().default(null)
 });
 const actionUpdateSchema = actionSchema.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
 const listenerSchema = z.object({
@@ -121,6 +128,16 @@ app.get("/v1/events", { preHandler: requireAuth }, async () => ({
   projects: store.listProjects()
 }));
 
+app.get("/v1/history", { preHandler: requireAuth }, async (request) => {
+  const query = request.query as { kind?: string; eventId?: string; source?: string; status?: string; limit?: string; from?: string; to?: string };
+  const limit = Math.min(Math.max(Number(query.limit ?? 200) || 200, 1), 1000);
+  return store.listHistory().filter((entry) =>
+    (!query.kind || entry.kind === query.kind) && (!query.eventId || entry.eventId === query.eventId) &&
+    (!query.source || entry.source === query.source) && (!query.status || entry.status === query.status) &&
+    (!query.from || entry.occurredAt >= query.from) && (!query.to || entry.occurredAt <= query.to)
+  ).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, limit);
+});
+
 app.post("/v1/projects", { preHandler: requireOwner }, async (request, reply) => {
   const parsed = projectSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid project", details: parsed.error.flatten() });
@@ -153,17 +170,18 @@ app.post("/v1/actions", { preHandler: requireAuth }, async (request, reply) => {
     return reply.code(403).send({ error: "Only the owner can assign projects" });
   }
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
-  if (parsed.data.schedule?.frequency === "once" && parsed.data.schedule.enabled && new Date(parsed.data.schedule.runAt) <= new Date()) {
+  const rawSchedule = parsed.data.schedule;
+  const schedules = rawSchedule && "frequency" in rawSchedule ? createSchedules({ [rawSchedule.frequency === "once" ? "once" : "recurring"]: rawSchedule }) : rawSchedule ? createSchedules(rawSchedule) : { once: null, recurring: null };
+  if (schedules.once?.enabled && schedules.once.runAt && new Date(schedules.once.runAt) <= new Date()) {
     return reply.code(400).send({ error: "A one-time schedule must be in the future" });
   }
   const timestamp = new Date().toISOString();
-  const schedule = parsed.data.schedule ? createSchedule(parsed.data.schedule) : null;
   const action: ActionEvent = {
     id: randomUUID(),
     kind: "action",
     ...parsed.data,
     projectId: parsed.data.projectId ?? null,
-    schedule,
+    schedule: schedules,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -176,9 +194,13 @@ app.post("/v1/actions/:id/run", { preHandler: requireAuth }, async (request, rep
   const action = store.findAction(id);
   if (!action) return reply.code(404).send({ error: "Action not found" });
   try {
-    return await runAction(action);
+    const startedAt = Date.now();
+    const result = await runAction(action);
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: result.ok ? "succeeded" : "failed", statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: result.ok ? null : `HTTP ${result.status}` });
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, error: message.slice(0, 500) });
     return reply.code(502).send({ error: message });
   }
 });
@@ -192,7 +214,10 @@ app.patch("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply)
     return reply.code(403).send({ error: "Only the owner can assign projects" });
   }
   if (parsed.data.projectId && !store.findProject(parsed.data.projectId)) return reply.code(400).send({ error: "Project not found" });
-  if (parsed.data.schedule?.frequency === "once" && parsed.data.schedule.enabled && new Date(parsed.data.schedule.runAt) <= new Date()) {
+  const rawSchedule = parsed.data.schedule;
+  const currentAction = store.findAction(id)!;
+  const schedules = rawSchedule && "frequency" in rawSchedule ? createSchedules({ [rawSchedule.frequency === "once" ? "once" : "recurring"]: rawSchedule }) : rawSchedule ? createSchedules(rawSchedule) : { once: null, recurring: null };
+  if (schedules.once?.enabled && schedules.once.runAt && new Date(schedules.once.runAt) <= new Date()) {
     return reply.code(400).send({ error: "A one-time schedule must be in the future" });
   }
   const update: Partial<Pick<ActionEvent, "name" | "method" | "url" | "headers" | "body" | "projectId" | "schedule">> = {};
@@ -202,7 +227,11 @@ app.patch("/v1/actions/:id", { preHandler: requireAuth }, async (request, reply)
   if (parsed.data.headers !== undefined) update.headers = parsed.data.headers;
   if (parsed.data.body !== undefined) update.body = parsed.data.body;
   if (parsed.data.projectId !== undefined) update.projectId = parsed.data.projectId;
-  if (parsed.data.schedule !== undefined) update.schedule = parsed.data.schedule ? createSchedule(parsed.data.schedule) : null;
+  if (parsed.data.schedule !== undefined) {
+    if (parsed.data.schedule === null) update.schedule = { once: null, recurring: null };
+    else if ("frequency" in parsed.data.schedule) update.schedule = { ...currentAction.schedule, ...(parsed.data.schedule.frequency === "once" ? { once: createSchedule(parsed.data.schedule) } : { recurring: createSchedule(parsed.data.schedule) }) };
+    else update.schedule = { once: parsed.data.schedule.once === undefined ? currentAction.schedule.once : (parsed.data.schedule.once ? createSchedule(parsed.data.schedule.once) : null), recurring: parsed.data.schedule.recurring === undefined ? currentAction.schedule.recurring : (parsed.data.schedule.recurring ? createSchedule(parsed.data.schedule.recurring) : null) };
+  }
   return store.updateAction(id, update);
 });
 
@@ -322,14 +351,16 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
     (counts, device) => ({ ...counts, [device.environment]: counts[device.environment] + 1 }),
     { sandbox: 0, production: 0 }
   );
-  return reply.code(202).send({
+  const webhookResult = {
     accepted: true,
     delivered,
     failed: devices.length - delivered,
     devices: devices.length,
     environments,
     errors: Array.from(failureCounts, ([reason, count]) => ({ reason, count }))
-  });
+  };
+  await store.addHistory({ kind: "listener", eventId: event.id, eventName: event.name, source: "webhook", status: "accepted", statusCode: 202, occurredAt: new Date().toISOString(), durationMs: null, error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered` });
+  return reply.code(202).send(webhookResult);
 });
 
 await store.load();

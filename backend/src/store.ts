@@ -1,10 +1,12 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { nextWeeklyRun } from "./schedule.js";
-import type { ActionEvent, ActionSchedule, Device, Listener, Project, ScheduleRunStatus, StoredData } from "./types.js";
+import type { ActionEvent, ActionSchedule, Device, HistoryEntry, Listener, Project, ScheduleRunStatus, StoredData } from "./types.js";
 
-const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], projects: [], devices: [] });
+const emptyData = (): StoredData => ({ version: 1, actions: [], listeners: [], projects: [], devices: [], history: [] });
+
+export interface DueAction { action: ActionEvent; scheduleKey: "once" | "recurring"; runAt: string }
 
 export class Store {
   private data: StoredData = emptyData();
@@ -28,16 +30,18 @@ export class Store {
       this.data = {
         version: 1,
         actions: (decoded.actions ?? []).map((item) => {
-          const schedule = item.schedule ?? null;
-          // A null status with lastRunAt means the process stopped after claiming the run but before recording its result.
-          const recoveredSchedule = schedule?.lastRunAt && schedule.lastRunStatus === null
-            ? { ...schedule, enabled: true, nextRunAt: schedule.lastRunAt }
-            : schedule;
-          return { ...item, projectId: item.projectId ?? null, schedule: recoveredSchedule };
+          const legacy = item.schedule as unknown;
+          const schedule = legacy && "frequency" in (legacy as object)
+            ? { once: (legacy as ActionSchedule).frequency === "once" ? legacy as ActionSchedule : null, recurring: (legacy as ActionSchedule).frequency === "weekly" ? legacy as ActionSchedule : null }
+            : { once: (legacy as { once?: ActionSchedule | null } | null)?.once ?? null, recurring: (legacy as { recurring?: ActionSchedule | null } | null)?.recurring ?? null };
+          const recover = (value: ActionSchedule | null) => value?.lastRunAt && value.lastRunStatus === null
+            ? { ...value, enabled: true, nextRunAt: value.lastRunAt } : value;
+          return { ...item, projectId: item.projectId ?? null, schedule: { once: recover(schedule.once), recurring: recover(schedule.recurring) } };
         }),
         listeners: (decoded.listeners ?? legacyListeners).map((item) => ({ ...item, kind: "listener", projectId: item.projectId ?? null })),
         projects: decoded.projects ?? [],
-        devices: decoded.devices ?? []
+        devices: decoded.devices ?? [],
+        history: decoded.history ?? []
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -49,6 +53,7 @@ export class Store {
   listListeners(): Listener[] { return structuredClone(this.data.listeners); }
   listProjects(): Project[] { return structuredClone(this.data.projects); }
   listDevices(): Device[] { return structuredClone(this.data.devices); }
+  listHistory(): HistoryEntry[] { return structuredClone(this.data.history); }
   findAction(id: string): ActionEvent | undefined { return structuredClone(this.data.actions.find((item) => item.id === id)); }
   findListener(id: string): Listener | undefined { return structuredClone(this.data.listeners.find((item) => item.id === id)); }
   findProject(id: string): Project | undefined { return structuredClone(this.data.projects.find((item) => item.id === id)); }
@@ -114,38 +119,42 @@ export class Store {
     return this.data.actions.length !== before;
   }
 
-  async claimDueActions(now: Date): Promise<ActionEvent[]> {
-    const due: ActionEvent[] = [];
+  async claimDueActions(now: Date): Promise<DueAction[]> {
+    const due: DueAction[] = [];
     const timestamp = now.toISOString();
     this.data.actions = this.data.actions.map((action) => {
-      const schedule = action.schedule;
-      if (!schedule?.enabled || !schedule.nextRunAt || schedule.nextRunAt > timestamp) return action;
-      due.push(structuredClone(action));
-      const scheduledFor = schedule.nextRunAt;
-      const updatedSchedule: ActionSchedule = schedule.frequency === "once"
-        ? { ...schedule, enabled: false, nextRunAt: null, lastRunAt: scheduledFor, lastRunStatus: null, lastError: null }
-        : {
-            ...schedule,
-            nextRunAt: nextWeeklyRun(schedule.weekdays, schedule.timeOfDay!, schedule.timeZone, now),
-            lastRunAt: scheduledFor,
-            lastRunStatus: null,
-            lastError: null
-          };
-      return { ...action, schedule: updatedSchedule, updatedAt: timestamp };
+      let updated = action;
+      for (const scheduleKey of ["once", "recurring"] as const) {
+        const schedule = updated.schedule[scheduleKey];
+        if (!schedule?.enabled || !schedule.nextRunAt || schedule.nextRunAt > timestamp) continue;
+        const scheduledFor = schedule.nextRunAt;
+        due.push({ action: structuredClone(updated), scheduleKey, runAt: scheduledFor });
+        const updatedSchedule: ActionSchedule = schedule.frequency === "once"
+          ? { ...schedule, enabled: false, nextRunAt: null, lastRunAt: scheduledFor, lastRunStatus: null, lastError: null }
+          : { ...schedule, nextRunAt: nextWeeklyRun(schedule.weekdays, schedule.timeOfDay!, schedule.timeZone, now), lastRunAt: scheduledFor, lastRunStatus: null, lastError: null };
+        updated = { ...updated, schedule: { ...updated.schedule, [scheduleKey]: updatedSchedule }, updatedAt: timestamp };
+      }
+      return updated;
     });
     if (due.length > 0) await this.persist();
     return due;
   }
 
-  async recordScheduledRun(id: string, runAt: string, status: ScheduleRunStatus, error: string | null): Promise<void> {
+  async recordScheduledRun(id: string, scheduleKey: "once" | "recurring", runAt: string, status: ScheduleRunStatus, error: string | null): Promise<void> {
     const index = this.data.actions.findIndex((item) => item.id === id);
     const action = this.data.actions[index];
-    if (!action?.schedule || action.schedule.lastRunAt !== runAt) return;
+    if (!action?.schedule[scheduleKey] || action.schedule[scheduleKey]!.lastRunAt !== runAt) return;
     this.data.actions[index] = {
       ...action,
-      schedule: { ...action.schedule, lastRunStatus: status, lastError: error },
+      schedule: { ...action.schedule, [scheduleKey]: { ...action.schedule[scheduleKey]!, lastRunStatus: status, lastError: error } },
       updatedAt: new Date().toISOString()
     };
+    await this.persist();
+  }
+
+  async addHistory(entry: Omit<HistoryEntry, "id">): Promise<void> {
+    this.data.history.push({ id: randomUUID(), ...entry });
+    if (this.data.history.length > 5000) this.data.history.splice(0, this.data.history.length - 5000);
     await this.persist();
   }
 

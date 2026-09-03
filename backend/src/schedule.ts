@@ -1,4 +1,4 @@
-import type { ActionSchedule } from "./types.js";
+import type { ActionSchedule, ActionSchedules } from "./types.js";
 
 export type ScheduleInput =
   | { frequency: "once"; enabled: boolean; runAt: string; timeZone: string }
@@ -97,4 +97,12 @@ export function createSchedule(input: ScheduleInput, now = new Date()): ActionSc
     lastRunStatus: null,
     lastError: null
   };
+}
+
+export function createSchedules(input: { once?: ScheduleInput | null; recurring?: ScheduleInput | null }, now = new Date()): ActionSchedules {
+  const once = input.once && input.once.frequency === "once" ? createSchedule(input.once, now) : null;
+  const recurring = input.recurring && input.recurring.frequency === "weekly" ? createSchedule(input.recurring, now) : null;
+  if (input.once && input.once.frequency !== "once") throw new Error("once must use frequency once");
+  if (input.recurring && input.recurring.frequency !== "weekly") throw new Error("recurring must use frequency weekly");
+  return { once, recurring };
 }

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct EventsView: View {
     @Bindable var model: AppModel
-    @State private var section: EventSection = .actions
+    @State private var page: AppPage = .actions
     @State private var projectFilter: ProjectFilter = .all
     @State private var presentedSheet: Sheet?
 
@@ -10,6 +10,18 @@ struct EventsView: View {
         case all
         case project(String)
         case unfiled
+    }
+
+    private enum AppPage: String, CaseIterable, Identifiable {
+        case actions = "Actions", listeners = "Listeners", log = "Log"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .actions: "bolt.fill"
+            case .listeners: "bell.fill"
+            case .log: "clock.arrow.circlepath"
+            }
+        }
     }
 
     private enum Sheet: Identifiable {
@@ -37,23 +49,19 @@ struct EventsView: View {
             ZStack {
                 DevcomTheme.canvas.ignoresSafeArea()
                 VStack(spacing: 0) {
-                    Picker("Event direction", selection: $section) {
-                        ForEach(EventSection.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, model.projects.isEmpty ? 14 : 10)
-
-                    if !model.projects.isEmpty {
+                    if page != .log && !model.projects.isEmpty {
                         projectBar
                     }
 
                     Group {
-                        if section == .actions { actionsList }
-                        else { listenersList }
+                        switch page {
+                        case .actions: actionsList
+                        case .listeners: listenersList
+                        case .log: logView
+                        }
                     }
-                    .animation(.easeOut(duration: 0.18), value: section)
+                    .animation(.easeOut(duration: 0.18), value: page)
+                    bottomBar
                 }
             }
             .navigationTitle("DEVCOM")
@@ -66,9 +74,10 @@ struct EventsView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        presentedSheet = section == .actions ? .createAction : .createListener
+                        presentedSheet = page == .actions ? .createAction : .createListener
                     } label: { Image(systemName: "plus") }
-                    .accessibilityLabel(section == .actions ? "Create action" : "Create listener")
+                    .accessibilityLabel(page == .actions ? "Create action" : "Create listener")
+                    .disabled(page == .log)
                 }
             }
             .refreshable { await model.refresh() }
@@ -88,7 +97,7 @@ struct EventsView: View {
                 if case .project(let id) = projectFilter, !projectIDs.contains(id) { projectFilter = .all }
             }
         }
-        .tint(section == .actions ? DevcomTheme.outbound : DevcomTheme.inbound)
+        .tint(page == .actions ? DevcomTheme.outbound : page == .listeners ? DevcomTheme.inbound : DevcomTheme.ink)
     }
 
     private var filteredActions: [ActionEvent] {
@@ -102,6 +111,30 @@ struct EventsView: View {
 
     private var filteredListeners: [Listener] {
         model.listeners.filter { matches(projectId: $0.projectId) }
+    }
+
+    private var bottomBar: some View {
+        HStack(spacing: 5) {
+            ForEach(AppPage.allCases) { destination in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { page = destination }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: destination.icon).font(.system(size: 15, weight: .semibold))
+                        if page == destination { Text(destination.rawValue).font(.caption.weight(.semibold)) }
+                    }
+                    .foregroundStyle(page == destination ? DevcomTheme.ink : DevcomTheme.muted)
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .background(page == destination ? DevcomTheme.surface : .clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(destination.rawValue)
+                .accessibilityAddTraits(page == destination ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 7)
+        .background(.thinMaterial)
+        .overlay(alignment: .top) { Rectangle().fill(DevcomTheme.muted.opacity(0.12)).frame(height: 1) }
     }
 
     private func matches(projectId: String?) -> Bool {
@@ -194,6 +227,63 @@ struct EventsView: View {
             .scrollContentBackground(.hidden)
         }
     }
+
+    private var logView: some View {
+        LogView(entries: model.history)
+    }
+}
+
+private struct LogView: View {
+    let entries: [HistoryEntry]
+    @State private var filter: LogFilter = .all
+    @State private var status: LogStatus = .all
+    @State private var query = ""
+
+    private enum LogFilter: String, CaseIterable, Identifiable {
+        case all = "All", actions = "Actions", listeners = "Listeners"
+        var id: String { rawValue }
+    }
+    private enum LogStatus: String, CaseIterable, Identifiable {
+        case all = "Any result", succeeded = "Succeeded", failed = "Failed"
+        var id: String { rawValue }
+    }
+    private var filteredEntries: [HistoryEntry] {
+        entries.filter { filter == .all || ($0.displayKind.lowercased() == filter.rawValue.lowercased()) }
+            .filter { status == .all || $0.status?.lowercased() == status.rawValue.lowercased() }
+            .filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query) }
+            .sorted { date($0.timestamp) > date($1.timestamp) }
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Log filter", selection: $filter) { ForEach(LogFilter.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 8)
+            Picker("Result filter", selection: $status) { ForEach(LogStatus.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).padding(.horizontal, 20).padding(.bottom, 8)
+            List {
+                if filteredEntries.isEmpty {
+                    ContentUnavailableView("No log entries", systemImage: "clock.arrow.circlepath", description: Text("Action and listener activity will appear here.")).listRowBackground(Color.clear)
+                } else {
+                    ForEach(filteredEntries) { entry in
+                        HStack(spacing: 12) {
+                            let isAction = entry.displayKind == "Action"
+                            let color = isAction ? DevcomTheme.outbound : DevcomTheme.inbound
+                            Image(systemName: isAction ? "bolt.fill" : "bell.fill").foregroundStyle(color).frame(width: 28, height: 28).background(color.opacity(0.12), in: Circle())
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(DevcomTheme.ink)
+                                Text("\(entry.displayKind) · \(entry.status ?? "recorded")").font(.caption).foregroundStyle(DevcomTheme.muted)
+                            }
+                            Spacer(); Text(date(entry.timestamp), style: .relative).font(.caption2).foregroundStyle(DevcomTheme.muted)
+                        }.padding(.vertical, 5).listRowBackground(DevcomTheme.surface)
+                    }
+                }
+            }.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter by name").scrollContentBackground(.hidden)
+        }
+    }
+    private func date(_ value: String?) -> Date {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let value else { return Date.distantPast }
+        return formatter.date(from: value) ?? Date.distantPast
+    }
 }
 
 private struct ActionRow: View {
@@ -214,9 +304,7 @@ private struct ActionRow: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(DevcomTheme.muted)
                             .lineLimit(1)
-                        if let schedule = action.schedule {
-                            ActionScheduleLabel(schedule: schedule)
-                        }
+                        ActionScheduleIndicators(schedules: action.schedule)
                         if let project { ProjectTag(project: project) }
                     }
                     Spacer(minLength: 6)
@@ -243,36 +331,20 @@ private struct ActionRow: View {
     }
 }
 
-private struct ActionScheduleLabel: View {
-    let schedule: ActionSchedule
+private struct ActionScheduleIndicators: View {
+    let schedules: ActionSchedules
 
     var body: some View {
-        Label(text, systemImage: schedule.enabled ? "clock" : "checkmark.circle")
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(DevcomTheme.muted)
-            .lineLimit(1)
-    }
-
-    private var text: String {
-        if schedule.enabled, schedule.frequency == .weekly, let time = schedule.timeOfDay {
-            let days = schedule.weekdays.compactMap { Self.weekdays.indices.contains($0) ? Self.weekdays[$0] : nil }.joined(separator: ", ")
-            return "Weekly \(days) · \(time) \(schedule.timeZone)"
+        HStack(spacing: 6) {
+            if schedules.once != nil { scheduleBadge("Once", icon: "calendar") }
+            if schedules.recurring != nil { scheduleBadge("Recurring", icon: "arrow.triangle.2.circlepath") }
         }
-        if let nextRunAt = schedule.nextRunAt, let date = Self.date(from: nextRunAt) {
-            return "Scheduled \(date.formatted(date: .abbreviated, time: .shortened))"
-        }
-        if schedule.lastRunStatus == "succeeded" { return "Scheduled run completed" }
-        if schedule.lastRunStatus == "failed" { return "Scheduled run failed" }
-        return "Schedule paused"
     }
 
-    private static func date(from value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value)
+    private func scheduleBadge(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon).font(.caption2.weight(.semibold)).foregroundStyle(DevcomTheme.muted)
+            .padding(.horizontal, 7).frame(height: 22).background(DevcomTheme.canvas, in: Capsule())
     }
-
-    private static let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 }
 
 private struct ListenerRow: View {
