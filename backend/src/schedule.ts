@@ -99,7 +99,7 @@ export function createSchedule(input: ScheduleInput, now = new Date()): ActionSc
   };
 }
 
-export function createSchedules(input: { once?: ScheduleInput | null; recurring?: ScheduleInput | null }, now = new Date()): ActionSchedules {
+export function createSchedules(input: { once?: ScheduleInput | null | undefined; recurring?: ScheduleInput | null | undefined }, now = new Date()): ActionSchedules {
   const once = input.once && input.once.frequency === "once" ? createSchedule(input.once, now) : null;
   const recurring = input.recurring && input.recurring.frequency === "weekly" ? createSchedule(input.recurring, now) : null;
   if (input.once && input.once.frequency !== "once") throw new Error("once must use frequency once");
