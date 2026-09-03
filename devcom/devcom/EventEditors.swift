@@ -107,7 +107,6 @@ struct ActionEditorView: View {
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         }
-                    }
                 } header: {
                     Text("Schedule")
                 } footer: {

@@ -114,7 +114,7 @@ struct EventsView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             ForEach(AppPage.allCases) { destination in
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) { page = destination }
@@ -124,17 +124,19 @@ struct EventsView: View {
                         if page == destination { Text(destination.rawValue).font(.caption.weight(.semibold)) }
                     }
                     .foregroundStyle(page == destination ? DevcomTheme.ink : DevcomTheme.muted)
-                    .frame(maxWidth: .infinity).frame(height: 42)
-                    .background(page == destination ? DevcomTheme.surface : .clear, in: Capsule())
+                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .contentShape(Rectangle())
+                    .background(page == destination ? DevcomTheme.surface.opacity(0.7) : .clear, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(destination.rawValue)
                 .accessibilityAddTraits(page == destination ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 7)
-        .background(.thinMaterial)
-        .overlay(alignment: .top) { Rectangle().fill(DevcomTheme.muted.opacity(0.12)).frame(height: 1) }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
     }
 
     private func matches(projectId: String?) -> Bool {
@@ -162,6 +164,7 @@ struct EventsView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 10)
         }
+        .frame(height: 46)
     }
 
     private func projectFilterButton(title: String, color: Color, filter: ProjectFilter) -> some View {
@@ -203,6 +206,7 @@ struct EventsView: View {
                         }
                 }
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -224,6 +228,7 @@ struct EventsView: View {
                         }
                 }
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -255,10 +260,30 @@ private struct LogView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Log filter", selection: $filter) { ForEach(LogFilter.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 8)
-            Picker("Result filter", selection: $status) { ForEach(LogStatus.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).padding(.horizontal, 20).padding(.bottom, 8)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    filterChip("All", selected: filter == .all) { filter = .all }
+                    filterChip("Actions", selected: filter == .actions) { filter = .actions }
+                    filterChip("Listeners", selected: filter == .listeners) { filter = .listeners }
+                    Divider().frame(height: 20)
+                    filterChip("Any result", selected: status == .all) { status = .all }
+                    filterChip("Succeeded", selected: status == .succeeded) { status = .succeeded }
+                    filterChip("Failed", selected: status == .failed) { status = .failed }
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(DevcomTheme.muted)
+                        TextField("Search log", text: $query)
+                            .textFieldStyle(.plain)
+                            .frame(width: 110)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(DevcomTheme.surface, in: Capsule())
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+            }
             List {
                 if filteredEntries.isEmpty {
                     ContentUnavailableView("No log entries", systemImage: "clock.arrow.circlepath", description: Text("Action and listener activity will appear here.")).listRowBackground(Color.clear)
@@ -276,8 +301,19 @@ private struct LogView: View {
                         }.padding(.vertical, 5).listRowBackground(DevcomTheme.surface)
                     }
                 }
-            }.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter by name").scrollContentBackground(.hidden)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
+    }
+
+    private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(selected ? DevcomTheme.ink : DevcomTheme.muted)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(selected ? DevcomTheme.outbound.opacity(0.14) : DevcomTheme.surface, in: Capsule())
     }
     private func date(_ value: String?) -> Date {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
