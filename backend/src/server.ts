@@ -302,6 +302,52 @@ app.delete("/v1/devices/:token", { preHandler: requireAuth }, async (request, re
   return reply.code(204).send();
 });
 
+async function deliverListener(event: Listener, title: string, message: string) {
+  const devices = store.listDevices();
+  const results = await Promise.allSettled(devices.map((device) => apns.send(device, { title, body: message })));
+  const failureCounts = new Map<string, number>();
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.invalidToken) await store.removeDevice(result.value.token);
+    if (result.status === "rejected") {
+      const reason = "APNs request failed";
+      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
+      app.log.warn({ error: result.reason }, reason);
+    }
+    if (result.status === "fulfilled" && !result.value.delivered) {
+      const reason = result.value.reason ?? "Unknown APNs error";
+      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
+      app.log.warn({ reason }, "Push was not delivered");
+    }
+  }
+  const delivered = results.filter((result) => result.status === "fulfilled" && result.value.delivered).length;
+  const environments = devices.reduce(
+    (counts, device) => ({ ...counts, [device.environment]: counts[device.environment] + 1 }),
+    { sandbox: 0, production: 0 }
+  );
+  const result = {
+    accepted: true,
+    delivered,
+    failed: devices.length - delivered,
+    devices: devices.length,
+    environments,
+    errors: Array.from(failureCounts, ([reason, count]) => ({ reason, count }))
+  };
+  const status = delivered === devices.length ? "accepted" : "failed";
+  await store.addHistory({
+    kind: "listener",
+    eventId: event.id,
+    eventName: event.name,
+    source: "webhook",
+    status,
+    statusCode: 202,
+    occurredAt: new Date().toISOString(),
+    durationMs: null,
+    response: JSON.stringify(result),
+    error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered: ${result.errors.map((item) => `${item.reason} (${item.count})`).join(", ")}`
+  });
+  return result;
+}
+
 app.get("/v1/hooks/:id/:secret", async (request, reply) => {
   const { id, secret } = request.params as { id: string; secret: string };
   const event = store.findListener(id);
@@ -330,38 +376,7 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
     request.headers["x-devcom-message"] ?? json?.message ?? json?.body ?? (typeof body === "string" ? body : "Event received")
   ).slice(0, 700);
 
-  const devices = store.listDevices();
-  const results = await Promise.allSettled(devices.map((device) => apns.send(device, { title, body: message })));
-  const failureCounts = new Map<string, number>();
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.invalidToken) await store.removeDevice(result.value.token);
-    if (result.status === "rejected") {
-      const reason = "APNs request failed";
-      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
-      app.log.warn({ error: result.reason }, reason);
-    }
-    if (result.status === "fulfilled" && !result.value.delivered) {
-      const reason = result.value.reason ?? "Unknown APNs error";
-      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
-      app.log.warn({ reason }, "Push was not delivered");
-    }
-  }
-  const delivered = results.filter((result) => result.status === "fulfilled" && result.value.delivered).length;
-  const environments = devices.reduce(
-    (counts, device) => ({ ...counts, [device.environment]: counts[device.environment] + 1 }),
-    { sandbox: 0, production: 0 }
-  );
-  const webhookResult = {
-    accepted: true,
-    delivered,
-    failed: devices.length - delivered,
-    devices: devices.length,
-    environments,
-    errors: Array.from(failureCounts, ([reason, count]) => ({ reason, count }))
-  };
-  const listenerStatus = delivered === devices.length ? "accepted" : "failed";
-  await store.addHistory({ kind: "listener", eventId: event.id, eventName: event.name, source: "webhook", status: listenerStatus, statusCode: 202, occurredAt: new Date().toISOString(), durationMs: null, response: JSON.stringify(webhookResult), error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered: ${webhookResult.errors.map((item) => `${item.reason} (${item.count})`).join(", ")}` });
-  return reply.code(202).send(webhookResult);
+  return reply.code(202).send(await deliverListener(event, title, message));
 });
 
 await store.load();

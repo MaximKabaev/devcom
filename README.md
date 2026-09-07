@@ -31,6 +31,12 @@ Requirements: Docker Compose, a public HTTPS hostname, and Apple Push Notificati
 5. Have your reverse proxy forward that hostname to `127.0.0.1:8080`, preserving the request body and `X-Devcom-*` headers.
 6. Start the Compose project yourself with `docker compose up -d --build`.
 
+Compose also starts a private `notification-relay` container. It is not published on
+the host; the backend reaches it at `http://notification-relay:8090/trigger`. The
+relay does not know about listeners or store credentials. It accepts a webhook URL
+and forwards a normal POST to that existing listener endpoint, so agents can create
+and edit a regular action through the documented `/v1/actions` API.
+
 A minimal Caddy site block is:
 
 ```caddyfile
@@ -131,6 +137,30 @@ Content-Type: application/json
 ```
 
 Alternatively, send any plain-text body and set `X-Devcom-Title`; or set both `X-Devcom-Title` and `X-Devcom-Message`. Titles are limited to 120 characters and messages to 700 characters; the backend also bounds the encoded APNs payload to 4 KB.
+
+To create a reusable notification test action, first create a listener and use its
+returned `webhookURL` in the body of a normal action. The action runner calls the
+private relay, and the relay calls the listener's existing webhook URL:
+
+```http
+POST /v1/actions
+Authorization: Bearer YOUR_AGENT_API_TOKEN
+Content-Type: application/json
+
+{
+  "name": "Test Deploy finished listener",
+  "method": "POST",
+  "url": "http://notification-relay:8090/trigger",
+  "headers": { "Content-Type": "application/json" },
+  "body": "{\"webhookURL\":\"YOUR_PUBLIC_URL/v1/hooks/LISTENER_ID/LISTENER_SECRET\",\"title\":\"Devcom test\",\"message\":\"Listener notification test\"}"
+}
+```
+
+Run that action whenever needed with `POST /v1/actions/{id}/run`, or add either
+the one-time or recurring schedule documented above. The relay returns the
+listener endpoint's status and response as `targetStatus` and `targetResponse`;
+those values are retained in the action history. The listener webhook also records
+the APNs delivery result in listener history, including delivery failures.
 
 ## API summary
 

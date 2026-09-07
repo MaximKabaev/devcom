@@ -12,5 +12,11 @@ services:
       HOST: 0.0.0.0
       DATA_FILE: /app/data/devcom.json
 
+  notification-relay:
+    build: ./notification-relay
+    restart: unless-stopped
+    expose:
+      - "8090"
+
 volumes:
   devcom-data:
