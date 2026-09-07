@@ -243,6 +243,7 @@ private struct LogView: View {
     @State private var filter: LogFilter = .all
     @State private var status: LogStatus = .all
     @State private var query = ""
+    @State private var expandedEntries: Set<String> = []
 
     private enum LogFilter: String, CaseIterable, Identifiable {
         case all = "All", actions = "Actions", listeners = "Listeners"
@@ -289,16 +290,15 @@ private struct LogView: View {
                     ContentUnavailableView("No log entries", systemImage: "clock.arrow.circlepath", description: Text("Action and listener activity will appear here.")).listRowBackground(Color.clear)
                 } else {
                     ForEach(filteredEntries) { entry in
-                        HStack(spacing: 12) {
-                            let isAction = entry.displayKind == "Action"
-                            let color = isAction ? DevcomTheme.outbound : DevcomTheme.inbound
-                            Image(systemName: isAction ? "bolt.fill" : "bell.fill").foregroundStyle(color).frame(width: 28, height: 28).background(color.opacity(0.12), in: Circle())
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(DevcomTheme.ink)
-                                Text("\(entry.displayKind) · \(entry.status ?? "recorded")").font(.caption).foregroundStyle(DevcomTheme.muted)
+                        LogEntryRow(
+                            entry: entry,
+                            isExpanded: expandedEntries.contains(entry.id),
+                            toggle: {
+                                if expandedEntries.contains(entry.id) { expandedEntries.remove(entry.id) }
+                                else { expandedEntries.insert(entry.id) }
                             }
-                            Spacer(); Text(date(entry.timestamp), style: .relative).font(.caption2).foregroundStyle(DevcomTheme.muted)
-                        }.padding(.vertical, 5).listRowBackground(DevcomTheme.surface)
+                        )
+                        .listRowBackground(DevcomTheme.surface)
                     }
                 }
             }
@@ -319,6 +319,76 @@ private struct LogView: View {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let value else { return Date.distantPast }
         return formatter.date(from: value) ?? Date.distantPast
+    }
+}
+
+private struct LogEntryRow: View {
+    let entry: HistoryEntry
+    let isExpanded: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Button(action: toggle) {
+                HStack(spacing: 12) {
+                    let isAction = entry.displayKind == "Action"
+                    let color = isAction ? DevcomTheme.outbound : DevcomTheme.inbound
+                    Image(systemName: isAction ? "bolt.fill" : "bell.fill")
+                        .foregroundStyle(color)
+                        .frame(width: 28, height: 28)
+                        .background(color.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(DevcomTheme.ink)
+                        Text("\(entry.displayKind) · \(entry.status ?? "recorded")\(entry.statusCode.map { " · HTTP \($0)" } ?? "")")
+                            .font(.caption)
+                            .foregroundStyle(entry.status?.lowercased() == "failed" ? .red : DevcomTheme.muted)
+                    }
+                    Spacer()
+                    Text(date(entry.timestamp), style: .relative).font(.caption2).foregroundStyle(DevcomTheme.muted)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DevcomTheme.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                if let error = entry.error, !error.isEmpty {
+                    detailBlock(title: "Failure", text: error, color: .red)
+                }
+                if let response = entry.response, !response.isEmpty {
+                    detailBlock(title: "Return payload", text: response, color: DevcomTheme.muted)
+                }
+                if let durationMs = entry.durationMs {
+                    Text("Duration \(durationMs) ms")
+                        .font(.caption2)
+                        .foregroundStyle(DevcomTheme.muted)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func detailBlock(title: String, text: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(DevcomTheme.ink)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(DevcomTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func date(_ value: String?) -> Date {
+        guard let value else { return .distantPast }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value) ?? .distantPast
     }
 }
 

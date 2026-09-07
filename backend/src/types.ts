@@ -38,6 +38,7 @@ export interface HistoryEntry {
   statusCode: number | null;
   occurredAt: string;
   durationMs: number | null;
+  response: string | null;
   error: string | null;
 }
 

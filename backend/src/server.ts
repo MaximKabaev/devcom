@@ -196,11 +196,11 @@ app.post("/v1/actions/:id/run", { preHandler: requireAuth }, async (request, rep
   try {
     const startedAt = Date.now();
     const result = await runAction(action);
-    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: result.ok ? "succeeded" : "failed", statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: result.ok ? null : `HTTP ${result.status}` });
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: result.ok ? "succeeded" : "failed", statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: Date.now() - startedAt, response: result.response, error: result.ok ? null : `HTTP ${result.status}` });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, error: message.slice(0, 500) });
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, response: null, error: message.slice(0, 500) });
     return reply.code(502).send({ error: message });
   }
 });
@@ -359,7 +359,8 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
     environments,
     errors: Array.from(failureCounts, ([reason, count]) => ({ reason, count }))
   };
-  await store.addHistory({ kind: "listener", eventId: event.id, eventName: event.name, source: "webhook", status: "accepted", statusCode: 202, occurredAt: new Date().toISOString(), durationMs: null, error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered` });
+  const listenerStatus = delivered === devices.length ? "accepted" : "failed";
+  await store.addHistory({ kind: "listener", eventId: event.id, eventName: event.name, source: "webhook", status: listenerStatus, statusCode: 202, occurredAt: new Date().toISOString(), durationMs: null, response: JSON.stringify(webhookResult), error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered: ${webhookResult.errors.map((item) => `${item.reason} (${item.count})`).join(", ")}` });
   return reply.code(202).send(webhookResult);
 });
 

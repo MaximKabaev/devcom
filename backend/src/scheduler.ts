@@ -18,12 +18,12 @@ export function startScheduler(store: Store, log: FastifyBaseLogger): () => void
           const status = result.ok ? "succeeded" : "failed";
           const error = result.ok ? null : `HTTP ${result.status}`;
           await store.recordScheduledRun(action.id, scheduleKey, runAt, status, error);
-          await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "scheduled", status, statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: result.durationMs, error });
+          await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "scheduled", status, statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: result.durationMs, response: result.response, error });
           log.info({ actionId: action.id, status: result.status }, "Scheduled action completed");
         } catch (error) {
           const message = error instanceof Error ? error.message : "Request failed";
           await store.recordScheduledRun(action.id, scheduleKey, runAt, "failed", message.slice(0, 500));
-          await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "scheduled", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, error: message.slice(0, 500) });
+          await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "scheduled", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, response: null, error: message.slice(0, 500) });
           log.warn({ actionId: action.id, error }, "Scheduled action failed");
         }
       }));

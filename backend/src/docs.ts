@@ -144,7 +144,7 @@ export const openApiDocument = {
       get: {
         tags: ["Events"], summary: "List action runs and listener deliveries", security: [{ bearerAuth: [] }],
         parameters: ["kind", "eventId", "source", "status", "from", "to", "limit"].map((name) => ({ name, in: "query", required: false, schema: { type: name === "limit" ? "integer" : "string" } })),
-        responses: { "200": { description: "Newest history entries, optionally filtered by event, kind, source, status, or ISO timestamp range." } }
+        responses: { "200": { description: "Newest history entries, optionally filtered by event, kind, source, status, or ISO timestamp range. Entries include statusCode, response payload, durationMs, and error details when available." } }
       }
     },
     "/v1/actions": {

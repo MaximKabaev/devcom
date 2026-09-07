@@ -116,6 +116,7 @@ nonisolated struct HistoryEntry: Codable, Identifiable, Sendable {
     let actionId: String?
     let listenerId: String?
     let status: String?
+    let statusCode: Int?
     let method: String?
     let url: String?
     let occurredAt: String?
