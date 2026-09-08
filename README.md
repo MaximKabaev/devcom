@@ -35,7 +35,9 @@ Compose also starts a private `notification-relay` container. It is not publishe
 the host; the backend reaches it at `http://notification-relay:8090/trigger`. The
 relay does not know about listeners or store credentials. It accepts a webhook URL
 and forwards a normal POST to that existing listener endpoint, so agents can create
-and edit a regular action through the documented `/v1/actions` API.
+and edit a regular action through the documented `/v1/actions` API. Starting Compose
+does not create an action automatically; an action must reference a specific
+listener webhook URL.
 
 A minimal Caddy site block is:
 
