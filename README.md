@@ -140,6 +140,23 @@ Content-Type: application/json
 
 Alternatively, send any plain-text body and set `X-Devcom-Title`; or set both `X-Devcom-Title` and `X-Devcom-Message`. Titles are limited to 120 characters and messages to 700 characters; the backend also bounds the encoded APNs payload to 4 KB.
 
+### Push a custom notification directly
+
+Agents can notify the owner with custom text without creating a listener:
+
+```http
+POST /v1/notify
+Authorization: Bearer YOUR_AGENT_API_TOKEN
+Content-Type: application/json
+
+{
+  "title": "Build finished",
+  "message": "All 214 tests passed on main"
+}
+```
+
+`message` is required (`body` is an alias); `title` defaults to `Agent`. Plain-text bodies with `X-Devcom-Title` / `X-Devcom-Message` headers are also accepted. The same 120/700 character limits apply (longer values are truncated), the `202` response carries the same delivery report as a listener webhook, and each send is recorded in history with `kind=listener` and `source=agent`.
+
 To create a reusable notification test action, first create a listener and use its
 returned `webhookURL` in the body of a normal action. The action runner calls the
 private relay, and the relay calls the listener's existing webhook URL:
@@ -179,6 +196,7 @@ the APNs delivery result in listener history, including delivery failures.
 | `POST` | `/v1/listeners` | Owner or agent bearer token | Create a listener |
 | `PATCH` | `/v1/listeners/:id` | Owner or agent bearer token | Rename a listener |
 | `DELETE` | `/v1/listeners/:id` | Owner or agent bearer token | Delete a listener |
+| `POST` | `/v1/notify` | Owner or agent bearer token | Push custom text to the owner |
 | `POST` | `/v1/devices` | Owner or agent bearer token | Register an APNs device |
 | `POST` | `/v1/hooks/:id/:secret` | Secret URL | Send a push notification |
 

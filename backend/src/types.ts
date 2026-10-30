@@ -25,7 +25,7 @@ export interface ActionSchedules {
 }
 
 export type HistoryKind = "action" | "listener";
-export type HistorySource = "manual" | "scheduled" | "webhook";
+export type HistorySource = "manual" | "scheduled" | "webhook" | "agent";
 export type HistoryStatus = "succeeded" | "failed" | "accepted";
 
 export interface HistoryEntry {

@@ -12,6 +12,7 @@ export const openApiDocument = {
     { name: "Events" },
     { name: "Actions" },
     { name: "Listeners" },
+    { name: "Notifications" },
     { name: "Devices" }
   ],
   components: {
@@ -98,6 +99,15 @@ export const openApiDocument = {
         properties: {
           token: { type: "string", pattern: "^[a-fA-F0-9]{64,}$" },
           environment: { type: "string", enum: ["sandbox", "production"] }
+        }
+      },
+      NotifyInput: {
+        type: "object",
+        required: ["message"],
+        properties: {
+          title: { type: "string", maxLength: 120, default: "Agent", description: "Longer values are truncated." },
+          message: { type: "string", maxLength: 700, description: "Longer values are truncated." },
+          body: { type: "string", maxLength: 700, description: "Alias for message." }
         }
       },
       WebhookInput: {
@@ -209,6 +219,24 @@ export const openApiDocument = {
         responses: { "204": { description: "Deleted." }, "404": { description: "Listener not found." } }
       }
     },
+    "/v1/notify": {
+      post: {
+        tags: ["Notifications"],
+        summary: "Push a custom notification to the owner",
+        description: "Sends a push notification with custom text to every registered device without creating a listener. JSON, plain text, X-Devcom-Title, and X-Devcom-Message are accepted. Deliveries are recorded in history with kind listener and source agent.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "X-Devcom-Title", in: "header", required: false, schema: { type: "string", maxLength: 120 } },
+          { name: "X-Devcom-Message", in: "header", required: false, schema: { type: "string", maxLength: 700 } }
+        ],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/NotifyInput" } }, "text/plain": { schema: { type: "string" } } } },
+        responses: {
+          "202": { description: "Notification accepted; includes delivery counts, device environments, and sanitized APNs error reasons." },
+          "400": { description: "A non-empty message is required." },
+          "401": { description: "Bearer token required." }
+        }
+      }
+    },
     "/v1/devices": {
       post: {
         tags: ["Devices"],
@@ -310,7 +338,7 @@ export const docsHTML = `<!doctype html>
     <div class="links"><a href="/openapi.json">OpenAPI JSON</a><a href="/health">Service health</a></div>
   </div></header>
   <main class="shell">
-    <nav aria-label="Documentation"><a href="#auth">Authentication</a><a href="#map">Endpoint map</a><a href="#actions">Actions</a><a href="#listeners">Listeners</a><a href="#devices">Devices</a><a href="#limits">Limits</a></nav>
+    <nav aria-label="Documentation"><a href="#auth">Authentication</a><a href="#map">Endpoint map</a><a href="#actions">Actions</a><a href="#listeners">Listeners</a><a href="#notify">Agent notifications</a><a href="#devices">Devices</a><a href="#limits">Limits</a></nav>
     <article>
       <section id="auth"><h2>Authentication</h2>
         <p>Management endpoints accept either the long-lived agent token or an owner session JWT:</p>
@@ -334,6 +362,7 @@ Content-Type: application/json</pre>
           <tr><td class="method">DELETE</td><td><code>/v1/listeners/:id</code></td><td>Bearer</td><td>Delete a listener</td></tr>
           <tr><td class="method">GET</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>View webhook usage</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/hooks/:id/:secret</code></td><td>URL secret</td><td>Deliver a push</td></tr>
+          <tr><td class="method">POST</td><td><code>/v1/notify</code></td><td>Bearer</td><td>Push custom text to the owner</td></tr>
           <tr><td class="method">POST</td><td><code>/v1/devices</code></td><td>Bearer</td><td>Register APNs device</td></tr>
           <tr><td class="method">DELETE</td><td><code>/v1/devices/:token</code></td><td>Bearer</td><td>Remove APNs device</td></tr>
         </tbody></table>
@@ -397,12 +426,24 @@ Content-Type: application/json
   --data '12.4 GB copied in 83 seconds'</pre>
         <p>For JSON, <code>message</code> and <code>body</code> are equivalent. <code>X-Devcom-Message</code> overrides both. The response reports delivery counts, registered device environments, and sanitized APNs error reasons. Each webhook delivery is recorded in <code>GET /v1/history</code>, which supports kind, event, source, status, timestamp, and limit filters. Opening the webhook URL in a browser returns these usage instructions without sending a notification.</p>
       </section>
+      <section id="notify"><h2>Agent notifications</h2><p>Agents holding the agent token can push a notification with custom text directly, without creating a listener first.</p>
+        <h3>Send with JSON</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/notify \\
+  -H "Authorization: Bearer $AGENT_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"title":"Build finished","message":"All 214 tests passed on main"}'</pre>
+        <h3>Send plain text</h3><pre>curl -X POST https://devcom.maximkabaev.com/v1/notify \\
+  -H "Authorization: Bearer $AGENT_API_TOKEN" \\
+  -H "Content-Type: text/plain" \\
+  -H "X-Devcom-Title: Need input" \\
+  --data 'Migration is ready to run. Approve?'</pre>
+        <p><code>message</code> is required; <code>body</code> is an alias. <code>title</code> defaults to <code>Agent</code>. <code>X-Devcom-Title</code> and <code>X-Devcom-Message</code> override JSON fields. Titles longer than 120 characters and messages longer than 700 characters are truncated. The <code>202</code> response has the same delivery report as listener webhooks, and each send is recorded in <code>GET /v1/history</code> with <code>kind=listener</code> and <code>source=agent</code>. Rate limit: 30 requests per minute per client.</p>
+      </section>
       <section id="devices"><h2>Devices</h2><p>The iOS client manages this automatically. Manual registration accepts a hexadecimal APNs token and <code>sandbox</code> or <code>production</code>.</p>
         <pre>POST /v1/devices
 {"token":"HEX_APNS_TOKEN","environment":"sandbox"}</pre>
       </section>
       <section id="limits"><h2>Behavior and limits</h2><ul>
-        <li>Action request timeout: 15 seconds.</li><li>Action response preview: 64 KB.</li><li>Action body: 200,000 characters.</li><li>Notification title: 120 characters.</li><li>Notification message: 700 characters.</li><li>Webhook rate limit: 30 requests per minute per client.</li><li>Global API rate limit: 120 requests per minute per client.</li>
+        <li>Action request timeout: 15 seconds.</li><li>Action response preview: 64 KB.</li><li>Action body: 200,000 characters.</li><li>Notification title: 120 characters.</li><li>Notification message: 700 characters.</li><li>Webhook and <code>/v1/notify</code> rate limit: 30 requests per minute per client.</li><li>Global API rate limit: 120 requests per minute per client.</li>
       </ul><p>Error responses use <code>{"error":"Human-readable message"}</code>. See the <a href="/openapi.json">OpenAPI document</a> for schemas and response codes.</p></section>
     </article>
   </main>

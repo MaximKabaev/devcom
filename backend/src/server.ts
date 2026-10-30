@@ -302,7 +302,7 @@ app.delete("/v1/devices/:token", { preHandler: requireAuth }, async (request, re
   return reply.code(204).send();
 });
 
-async function deliverListener(event: Listener, title: string, message: string) {
+async function deliverNotification(origin: { eventId: string; eventName: string; source: "webhook" | "agent" }, title: string, message: string) {
   const devices = store.listDevices();
   const results = await Promise.allSettled(devices.map((device) => apns.send(device, { title, body: message })));
   const failureCounts = new Map<string, number>();
@@ -335,9 +335,9 @@ async function deliverListener(event: Listener, title: string, message: string) 
   const status = delivered === devices.length ? "accepted" : "failed";
   await store.addHistory({
     kind: "listener",
-    eventId: event.id,
-    eventName: event.name,
-    source: "webhook",
+    eventId: origin.eventId,
+    eventName: origin.eventName,
+    source: origin.source,
     status,
     statusCode: 202,
     occurredAt: new Date().toISOString(),
@@ -376,7 +376,26 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
     request.headers["x-devcom-message"] ?? json?.message ?? json?.body ?? (typeof body === "string" ? body : "Event received")
   ).slice(0, 700);
 
-  return reply.code(202).send(await deliverListener(event, title, message));
+  return reply.code(202).send(await deliverNotification({ eventId: event.id, eventName: event.name, source: "webhook" }, title, message));
+});
+
+const notifySchema = z.object({
+  title: z.string().trim().min(1).transform((value) => value.slice(0, 120)).optional(),
+  message: z.string().trim().min(1).transform((value) => value.slice(0, 700))
+});
+
+app.post("/v1/notify", { preHandler: requireAuth, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+  const body = request.body;
+  const json = body && typeof body === "object" ? body as Record<string, unknown> : undefined;
+  const headerTitle = request.headers["x-devcom-title"];
+  const headerMessage = request.headers["x-devcom-message"];
+  const parsed = notifySchema.safeParse({
+    title: typeof headerTitle === "string" ? headerTitle : json?.title,
+    message: typeof headerMessage === "string" ? headerMessage : json?.message ?? json?.body ?? (typeof body === "string" ? body : undefined)
+  });
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid notification", details: parsed.error.flatten() });
+  const title = parsed.data.title ?? "Agent";
+  return reply.code(202).send(await deliverNotification({ eventId: "agent", eventName: title, source: "agent" }, title, parsed.data.message));
 });
 
 await store.load();
