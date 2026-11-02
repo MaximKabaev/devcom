@@ -154,7 +154,7 @@ export const openApiDocument = {
       get: {
         tags: ["Events"], summary: "List action runs and listener deliveries", security: [{ bearerAuth: [] }],
         parameters: ["kind", "eventId", "source", "status", "from", "to", "limit"].map((name) => ({ name, in: "query", required: false, schema: { type: name === "limit" ? "integer" : "string" } })),
-        responses: { "200": { description: "Newest history entries, optionally filtered by event, kind, source, status, or ISO timestamp range. Entries include statusCode, response payload, durationMs, and error details when available." } }
+        responses: { "200": { description: "Newest history entries, optionally filtered by event, kind, source, status, or ISO timestamp range. Entries include statusCode, response payload, durationMs, and error details when available. Newer entries also carry caller (channel app, api, webhook, or scheduler, plus client address, user agent, and the app's self-reported client label), the request method and url for action runs, and the pushed title and message for notifications." } }
       }
     },
     "/v1/actions": {

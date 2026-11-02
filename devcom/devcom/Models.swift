@@ -105,6 +105,33 @@ nonisolated struct ActionRunResult: Codable, Identifiable, Sendable {
     var id: String { "\(status)-\(durationMs)-\(response)" }
 }
 
+/// Who made a call, as recorded by the server. `client` is the label the iOS
+/// app sends about itself; `userAgent` is whatever any other client announced.
+nonisolated struct HistoryCaller: Codable, Sendable {
+    let channel: String?
+    let ip: String?
+    let userAgent: String?
+    let client: String?
+}
+
+/// Coarse origin used for filtering the log.
+nonisolated enum LogOrigin: Sendable {
+    case app, external, scheduled, unknown
+}
+
+/// Delivery counts the server stores as JSON in a notification's `response`.
+nonisolated struct DeliveryReport: Decodable, Sendable {
+    let delivered: Int?
+    let failed: Int?
+    let devices: Int?
+    let errors: [Failure]?
+
+    nonisolated struct Failure: Decodable, Sendable {
+        let reason: String
+        let count: Int
+    }
+}
+
 /// A server-side record of an action execution or an inbound listener delivery.
 /// Optional fields keep the client compatible with older history records and
 /// with the two different event shapes returned by the API.
@@ -115,6 +142,7 @@ nonisolated struct HistoryEntry: Codable, Identifiable, Sendable {
     let eventName: String?
     let actionId: String?
     let listenerId: String?
+    let source: String?
     let status: String?
     let statusCode: Int?
     let method: String?
@@ -125,6 +153,9 @@ nonisolated struct HistoryEntry: Codable, Identifiable, Sendable {
     let response: String?
     let error: String?
     let projectId: String?
+    let title: String?
+    let message: String?
+    let caller: HistoryCaller?
 
     var displayKind: String {
         switch (kind ?? "").lowercased() {
@@ -133,8 +164,81 @@ nonisolated struct HistoryEntry: Codable, Identifiable, Sendable {
         }
     }
 
+    var isNotification: Bool { displayKind == "Listener" }
     var displayName: String { eventName ?? eventId ?? actionId ?? listenerId ?? "Unknown event" }
     var timestamp: String? { occurredAt ?? createdAt }
+
+    var date: Date {
+        guard let value = timestamp else { return .distantPast }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = fractional.date(from: value) { return parsed }
+        return ISO8601DateFormatter().date(from: value) ?? .distantPast
+    }
+
+    var isFailure: Bool { status?.lowercased() == "failed" }
+    var isSuccess: Bool { ["succeeded", "accepted"].contains(status?.lowercased() ?? "") }
+
+    /// The channel the server recorded, or for older entries the coarse
+    /// `source`, which cannot tell the app apart from another API client.
+    private var originKey: String { (caller?.channel ?? source ?? "").lowercased() }
+
+    var origin: LogOrigin {
+        switch originKey {
+        case "app": .app
+        case "api", "webhook", "agent": .external
+        case "scheduler", "scheduled": .scheduled
+        default: .unknown
+        }
+    }
+
+    var originTitle: String {
+        switch originKey {
+        case "app": "App"
+        case "api", "agent": "API"
+        case "webhook": "Webhook"
+        case "scheduler", "scheduled": "Schedule"
+        case "manual": "Manual"
+        default: "Unknown"
+        }
+    }
+
+    var originSymbol: String {
+        switch originKey {
+        case "app": "iphone"
+        case "api", "agent": "network"
+        case "webhook": "link"
+        case "scheduler", "scheduled": "clock"
+        default: "questionmark.circle"
+        }
+    }
+
+    /// True for entries recorded before the server kept caller details.
+    var originIsPartial: Bool { caller == nil }
+
+    var deliveryReport: DeliveryReport? {
+        guard isNotification, let data = response?.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(DeliveryReport.self, from: data)
+    }
+
+    /// The response body, pretty-printed when it is a JSON object or array.
+    var formattedResponse: String? {
+        guard let response, !response.isEmpty else { return nil }
+        if let data = response.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data),
+           object is [String: Any] || object is [Any],
+           let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+           let text = String(data: pretty, encoding: .utf8) {
+            return text
+        }
+        return response
+    }
+
+    /// Everything a search should be able to match.
+    var searchText: String {
+        [displayName, title, message, url, caller?.ip, caller?.client, caller?.userAgent, originTitle]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
 }
 
 nonisolated struct HistoryResponse: Decodable, Sendable {

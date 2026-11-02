@@ -27,6 +27,18 @@ export interface ActionSchedules {
 export type HistoryKind = "action" | "listener";
 export type HistorySource = "manual" | "scheduled" | "webhook" | "agent";
 export type HistoryStatus = "succeeded" | "failed" | "accepted";
+/** How a request reached the server: the iOS app, any other API client with a
+ * bearer token, an inbound webhook URL, or the server's own scheduler. */
+export type HistoryChannel = "app" | "api" | "webhook" | "scheduler";
+
+export interface HistoryCaller {
+  channel: HistoryChannel;
+  /** Client address as seen behind the reverse proxy; null for the scheduler. */
+  ip: string | null;
+  userAgent: string | null;
+  /** Self-reported label from the app (X-Devcom-Client), e.g. "Devcom iOS 1.0 · iPhone17,1 · iOS 26.1". */
+  client: string | null;
+}
 
 export interface HistoryEntry {
   id: string;
@@ -40,6 +52,14 @@ export interface HistoryEntry {
   durationMs: number | null;
   response: string | null;
   error: string | null;
+  // Added later: absent on older records, so every one is optional.
+  caller?: HistoryCaller | null;
+  /** Action runs: the request that was sent (snapshot, the action may change later). */
+  method?: HTTPMethod | null;
+  url?: string | null;
+  /** Notifications: the text that was pushed. */
+  title?: string | null;
+  message?: string | null;
 }
 
 export interface Project {

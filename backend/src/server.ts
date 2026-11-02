@@ -13,7 +13,7 @@ import { docsHTML, openApiDocument } from "./docs.js";
 import { createSchedule, createSchedules, isValidTimeZone } from "./schedule.js";
 import { startScheduler } from "./scheduler.js";
 import { Store } from "./store.js";
-import { httpMethods, projectColors, type ActionEvent, type Listener, type Project } from "./types.js";
+import { httpMethods, projectColors, type ActionEvent, type HistoryCaller, type Listener, type Project } from "./types.js";
 
 const config = loadConfig();
 const store = new Store(config.DATA_FILE, config.CONFIG_ENCRYPTION_KEY);
@@ -22,7 +22,11 @@ const apns = new APNSClient(config);
 const app = Fastify({
   logger: { redact: ["req.headers.authorization"] },
   disableRequestLogging: true,
-  bodyLimit: 256 * 1024
+  bodyLimit: 256 * 1024,
+  // Behind Caddy, so the socket peer is the proxy. Trust X-Forwarded-For only
+  // from private addresses (the proxy on the docker network or loopback); the
+  // history log and the rate limiter then see the real client address.
+  trustProxy: "loopback, linklocal, uniquelocal"
 });
 
 await app.register(helmet);
@@ -41,6 +45,22 @@ async function requireOwner(request: FastifyRequest, reply: FastifyReply): Promi
   if (!(await isOwner(request.headers.authorization, config))) {
     return reply.code(401).send({ error: "Owner session required" });
   }
+}
+
+function headerText(value: string | string[] | undefined, max: number): string | null {
+  const text = (Array.isArray(value) ? value[0] : value)?.trim();
+  return text ? text.slice(0, max) : null;
+}
+
+/** Who made this request. `channel` is chosen by the caller of this helper
+ * because only the route knows whether an app label is meaningful. */
+function callerOf(request: FastifyRequest, channel: "app" | "api" | "webhook"): HistoryCaller {
+  return {
+    channel,
+    ip: request.ip || null,
+    userAgent: headerText(request.headers["user-agent"], 200),
+    client: headerText(request.headers["x-devcom-client"], 120)
+  };
 }
 
 function webhookURL(event: Listener): string {
@@ -193,14 +213,16 @@ app.post("/v1/actions/:id/run", { preHandler: requireAuth }, async (request, rep
   const id = (request.params as { id: string }).id;
   const action = store.findAction(id);
   if (!action) return reply.code(404).send({ error: "Action not found" });
+  // Only the iOS app sends X-Devcom-Client; anything else with a token is "api".
+  const caller = callerOf(request, request.headers["x-devcom-client"] ? "app" : "api");
   try {
     const startedAt = Date.now();
     const result = await runAction(action);
-    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: result.ok ? "succeeded" : "failed", statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: Date.now() - startedAt, response: result.response, error: result.ok ? null : `HTTP ${result.status}` });
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: result.ok ? "succeeded" : "failed", statusCode: result.status, occurredAt: new Date().toISOString(), durationMs: Date.now() - startedAt, response: result.response, error: result.ok ? null : `HTTP ${result.status}`, caller, method: action.method, url: action.url });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, response: null, error: message.slice(0, 500) });
+    await store.addHistory({ kind: "action", eventId: action.id, eventName: action.name, source: "manual", status: "failed", statusCode: null, occurredAt: new Date().toISOString(), durationMs: null, response: null, error: message.slice(0, 500), caller, method: action.method, url: action.url });
     return reply.code(502).send({ error: message });
   }
 });
@@ -302,7 +324,7 @@ app.delete("/v1/devices/:token", { preHandler: requireAuth }, async (request, re
   return reply.code(204).send();
 });
 
-async function deliverNotification(origin: { eventId: string; eventName: string; source: "webhook" | "agent" }, title: string, message: string) {
+async function deliverNotification(origin: { eventId: string; eventName: string; source: "webhook" | "agent"; caller: HistoryCaller }, title: string, message: string) {
   const devices = store.listDevices();
   const results = await Promise.allSettled(devices.map((device) => apns.send(device, { title, body: message })));
   const failureCounts = new Map<string, number>();
@@ -343,6 +365,9 @@ async function deliverNotification(origin: { eventId: string; eventName: string;
     occurredAt: new Date().toISOString(),
     durationMs: null,
     response: JSON.stringify(result),
+    caller: origin.caller,
+    title,
+    message,
     error: delivered === devices.length ? null : `${devices.length - delivered} notification(s) not delivered: ${result.errors.map((item) => `${item.reason} (${item.count})`).join(", ")}`
   });
   return result;
@@ -376,7 +401,7 @@ app.post("/v1/hooks/:id/:secret", { config: { rateLimit: { max: 30, timeWindow: 
     request.headers["x-devcom-message"] ?? json?.message ?? json?.body ?? (typeof body === "string" ? body : "Event received")
   ).slice(0, 700);
 
-  return reply.code(202).send(await deliverNotification({ eventId: event.id, eventName: event.name, source: "webhook" }, title, message));
+  return reply.code(202).send(await deliverNotification({ eventId: event.id, eventName: event.name, source: "webhook", caller: callerOf(request, "webhook") }, title, message));
 });
 
 const notifySchema = z.object({
@@ -395,7 +420,7 @@ app.post("/v1/notify", { preHandler: requireAuth, config: { rateLimit: { max: 30
   });
   if (!parsed.success) return reply.code(400).send({ error: "Invalid notification", details: parsed.error.flatten() });
   const title = parsed.data.title ?? "Agent";
-  return reply.code(202).send(await deliverNotification({ eventId: "agent", eventName: title, source: "agent" }, title, parsed.data.message));
+  return reply.code(202).send(await deliverNotification({ eventId: "agent", eventName: title, source: "agent", caller: callerOf(request, "api") }, title, parsed.data.message));
 });
 
 await store.load();

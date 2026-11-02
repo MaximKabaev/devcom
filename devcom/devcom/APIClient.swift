@@ -21,6 +21,19 @@ actor APIClient {
     private let token: String?
     private let session: URLSession
 
+    /// "Devcom iOS 1.1; iPhone17,1; iOS 26.2" — ASCII only, it travels in a header.
+    private static let clientLabel: String = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        var system = utsname()
+        uname(&system)
+        let machine = withUnsafeBytes(of: &system.machine) { buffer in
+            String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? machine
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        return "Devcom iOS \(version); \(model); iOS \(os.majorVersion).\(os.minorVersion)"
+    }()
+
     init(baseURL: URL, token: String? = nil) {
         self.baseURL = baseURL
         self.token = token
@@ -123,6 +136,8 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Lets the server's history log tell this app apart from other API clients.
+        request.setValue(Self.clientLabel, forHTTPHeaderField: "X-Devcom-Client")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
